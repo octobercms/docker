@@ -18,13 +18,25 @@ The following packages are included
 - [Docker](https://www.docker.com/products/docker-desktop)
 - [Docker Compose](https://docs.docker.com/compose/overview/)
 
-## 1. Build
+## 1. Environment
+
+```
+cp .env.example .env
+```
+
+Add license key to `.env` file
+
+```
+LICENSE_KEY=XXXXX-XXXXX-XXXXX-XXXXX
+```
+
+## 2. Build
 
 ```
 docker build -t october:latest .
 ```
 
-## 2. Run
+## 3. Run
 
 ```
 docker-compose up -d
@@ -32,7 +44,7 @@ docker-compose up -d
 
 Open the URL `http://localhost:8000` to navigate to October CMS
 
-## 3. Shell
+## 4. Shell
 
 ```
 docker exec -it october sh

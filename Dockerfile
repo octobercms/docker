@@ -64,7 +64,7 @@ USER www-data
 
 # Installs October CMS
 WORKDIR /var/www
-RUN composer create-project october/october octobercms-install --no-interaction --prefer-dist --no-scripts && \
+RUN composer create-project october/october octobercms-install --no-interaction --prefer-dist && \
     mv -T /var/www/octobercms-install /var/www/html
 
 # Adds SQLite database
@@ -72,10 +72,12 @@ WORKDIR /var/www/html
 RUN touch storage/database.sqlite && \
     chmod 666 storage/database.sqlite
 
+ARG LICENSE_KEY
+
 # Artisan commands
 RUN php artisan key:generate && \
-    php artisan package:discover && \
-    php artisan october:env
+    php artisan project:set ${LICENSE_KEY} && \
+    php artisan october:build
 
 # Creates cron job for maintenance scripts
 RUN (crontab -l; echo "* * * * * cd /var/www/html;/usr/local/bin/php artisan schedule:run 1>> /dev/null 2>&1") | crontab -

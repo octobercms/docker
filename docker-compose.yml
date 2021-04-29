@@ -6,8 +6,13 @@ services:
     container_name: october
     ports:
       - 8000:80
+    build:
+      context: .
+      args:
+        LICENSE_KEY: $LICENSE_KEY
     environment:
       - DB_CONNECTION=sqlite
       - DB_DATABASE=storage/database.sqlite
+      - LICENSE_KEY=$LICENSE_KEY
       # - APP_URL=https://octobercms.com/
       # - LINK_POLICY=secure
