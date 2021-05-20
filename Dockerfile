@@ -1,3 +1,35 @@
+# Multi Stage Build: Part 1
+# -------------------------
+FROM php:7.4-apache as intermediate
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    unzip \
+    libpng-dev \
+    libzip4 \
+    libzip-dev \
+    git \
+    && docker-php-ext-install zip \
+    && docker-php-ext-install -j$(nproc) gd
+
+RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+
+RUN composer create-project october/october . --no-interaction --prefer-dist
+
+RUN sed -i 's/DB_CONNECTION=mysql/DB_CONNECTION=sqlite/' .env && \
+    sed -i 's/DB_DATABASE=database/DB_DATABASE=storage\/database.sqlite/' .env
+
+ARG LICENSE_KEY
+
+RUN php artisan key:generate && \
+    php artisan project:set ${LICENSE_KEY} && \
+    php artisan october:build
+
+# Delete license key
+RUN rm auth.json && \
+    rm storage/cms/project.json
+
+# Multi Stage Build: Part 2
+# -------------------------
 FROM php:7.4-apache
 LABEL maintainer="October CMS <hello@octobercms.com> (@octobercms)"
 
@@ -58,24 +90,16 @@ RUN pecl install apcu \
 # Install composer
 RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
 
-# Sets user to www-data
-RUN chown www-data:www-data /var/www
-USER www-data
+# Copy install from previous image
+COPY --chown=www-data:www-data --from=intermediate /var/www/html /var/www/html
 
-# Installs October CMS
-WORKDIR /var/www
-RUN composer create-project october/october octobercms-install --no-interaction --prefer-dist --no-scripts && \
-    mv -T /var/www/octobercms-install /var/www/html
+# Sets user to www-data
+USER www-data
 
 # Adds SQLite database
 WORKDIR /var/www/html
 RUN touch storage/database.sqlite && \
     chmod 666 storage/database.sqlite
-
-# Artisan commands
-RUN php artisan key:generate && \
-    php artisan package:discover && \
-    php artisan october:env
 
 # Creates cron job for maintenance scripts
 RUN (crontab -l; echo "* * * * * cd /var/www/html;/usr/local/bin/php artisan schedule:run 1>> /dev/null 2>&1") | crontab -

@@ -2,12 +2,7 @@
 version: '2.2'
 services:
   web:
-    image: october:latest
+    image: octobercms/october:latest
     container_name: october
     ports:
-      - 8000:80
-    environment:
-      - DB_CONNECTION=sqlite
-      - DB_DATABASE=storage/database.sqlite
-      # - APP_URL=https://octobercms.com/
-      # - LINK_POLICY=secure
+      - 80:80

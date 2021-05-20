@@ -2,7 +2,7 @@
 set -e
 
 echo 'Migrating database...'
-php artisan october:up
+php artisan october:migrate
 
 echo 'Setting permissions...'
 chown -R www-data:www-data /var/www/html/storage

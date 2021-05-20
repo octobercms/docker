@@ -1,45 +1,37 @@
-# Docker Image for October CMS
+# Docker + October CMS
 
-The following packages are included
+This docker image serves as a starting point for [October CMS](https://octobercms.com) projects. It may be used for research and demonstration purposes.
 
-* apache-2.4.38
-* GD library
-* Zip library
-* Composer
-* php7.4
-* php7.4-opcache
-* php7.4-acpu
-* php7.4-yaml
-* vim + nano
-* cron
+Based on [official docker PHP images](https://hub.docker.com/_/php), images include dependencies required by October, Composer and install the [latest release](https://octobercms.com/changelog).
 
-## 0. Dev Dependencies
+The docker image is made possible with help from our partner [Aspen Digital](https://octobercms.com/partners/profile/aspendigital).
 
-- [Docker](https://www.docker.com/products/docker-desktop)
-- [Docker Compose](https://docs.docker.com/compose/overview/)
+## Quick Start
 
-## 1. Build
+To run October CMS using Docker, start a container using the latest image, mapping your local port 80 to the container's port 80:
 
-```
-docker build -t october:latest .
-```
+    $ docker run -p 80:80 --name october octobercms/october:latest
+    # `CTRL-C` to stop
+    $ docker rm october  # Destroys the container
 
-## 2. Run
+If there is a port conflict, you will receive an error message from the Docker daemon. Try mapping to an open local port (`-p 8080:80`) or shut down the container or server that is on the desired port.
 
-```
-docker-compose up -d
-```
+ - Visit [http://localhost](http://localhost) using your browser.
+ - Login to the [backend](http://localhost/backend) and set up an administrator account
+ - Hit `CTRL-C` to stop the container. Running a container in the foreground will send log outputs to your terminal.
 
-Open the URL `http://localhost:8000` to navigate to October CMS
+Run the container in the background by passing the `-d` option:
 
-## 3. Shell
+    $ docker run -p 80:80 --name october -d octobercms/october:latest
+    $ docker stop october  # Stops the container. To restart `docker start october`
+    $ docker rm october  # Destroys the container
 
-```
-docker exec -it october sh
-```
+## Building this Image
 
-### X. Destroy
+Use the following command to build this image locally using your license key.
 
-```
-docker-compose down
-```
+    docker build -t myoctober:latest . --build-arg LICENSE_KEY=<enter license key here>
+
+---
+
+![October](https://raw.githubusercontent.com/octobercms/docker/master/aspendigital-octobercms-docker-logo.png)
