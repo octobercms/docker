@@ -1,4 +1,4 @@
-# Docker + October CMS
+# Custom Build
 
 The custom docker build acts as a template for rolling your own private docker image. The application is built up front but a license key is required at build time.
 
