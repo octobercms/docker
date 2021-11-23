@@ -64,7 +64,7 @@ USER www-data
 
 # Installs October CMS
 WORKDIR /var/www
-RUN composer create-project october/october octobercms-install --no-interaction --prefer-dist --no-scripts && \
+RUN composer create-project october/october octobercms-install --no-interaction --prefer-dist && \
     mv -T /var/www/octobercms-install /var/www/html
 
 # Adds SQLite database

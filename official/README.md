@@ -29,3 +29,7 @@ Run the container in the background by passing the `-d` option:
     $ docker run -p 80:80 --name october -d octobercms/october:latest
     $ docker stop october  # Stops the container. To restart `docker start october`
     $ docker rm october  # Destroys the container
+
+To gain shell access to your container:
+
+    docker exec -it october bash

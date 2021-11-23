@@ -20,6 +20,7 @@ RUN sed -i 's/DB_CONNECTION=mysql/DB_CONNECTION=sqlite/' .env && \
 
 ARG LICENSE_KEY
 
+# Artisan commands
 RUN php artisan key:generate && \
     php artisan project:set ${LICENSE_KEY} && \
     php artisan october:build
