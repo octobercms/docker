@@ -26,8 +26,8 @@ RUN php artisan key:generate && \
     php artisan october:build
 
 # Delete license key
-RUN rm auth.json && \
-    rm storage/cms/project.json
+# RUN rm auth.json && \
+#     rm storage/cms/project.json
 
 # Multi Stage Build: Part 2
 # -------------------------

@@ -11,7 +11,7 @@ The docker image is made possible with help from our partner [Aspen Digital](htt
 This repo provides two approaches:
 
 - [Use Custom Build](./custom) as a template to roll your own private build.
-- [Use Official Build](./official) to use the official docker image ([coming soon](https://portal.octobercms.com/c/33-docker-image-for-october-cms)))
+- [Use Official Build](./official) to use the official docker image ([coming soon](https://portal.octobercms.com/c/33-docker-image-for-october-cms)).
 
 ---
 
