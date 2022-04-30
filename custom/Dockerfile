@@ -1,6 +1,6 @@
 # Multi Stage Build: Part 1
 # -------------------------
-FROM php:7.4-apache as intermediate
+FROM php:8.1-apache as intermediate
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
@@ -31,7 +31,7 @@ RUN php artisan key:generate && \
 
 # Multi Stage Build: Part 2
 # -------------------------
-FROM php:7.4-apache
+FROM php:8.1-apache
 LABEL maintainer="October CMS <hello@octobercms.com> (@octobercms)"
 
 # Enables apache rewrite w/ security
@@ -85,7 +85,7 @@ RUN { \
     } > /usr/local/etc/php/conf.d/php-recommended.ini
 
 RUN pecl install apcu \
-    && pecl install yaml-2.0.4 \
+    && pecl install yaml-2.2.2 \
     && docker-php-ext-enable apcu yaml
 
 # Install composer
