@@ -1,18 +1,12 @@
 # Docker + October CMS
 
-This docker image serves as a starting point for [October CMS](https://octobercms.com) projects. It may be used for research and demonstration purposes.
+This repo contains tools for working with Docker and  [October CMS](https://octobercms.com) projects. It may be used for research and demonstration purposes.
 
-Based on [official docker PHP images](https://hub.docker.com/_/php), images include dependencies required by October, Composer and install the [latest release](https://octobercms.com/changelog).
-
-The docker image is made possible with help from our partner [Aspen Digital](https://octobercms.com/partners/profile/aspendigital).
+Based on [official docker PHP images](https://hub.docker.com/_/php), images include dependencies required by October CMS, Composer and install the [latest release](https://octobercms.com/changelog).
 
 ## Getting Started
 
-This repo provides two approaches:
+You can get started by using one of the following approaches:
 
+- [Use Developer Build](./dev) to use the local development docker image.
 - [Use Custom Build](./custom) as a template to roll your own private build.
-- [Use Official Build](./official) to use the official docker image ([coming soon](https://portal.octobercms.com/c/33-docker-image-for-october-cms)).
-
----
-
-![October](https://raw.githubusercontent.com/octobercms/docker/master/aspendigital-octobercms-docker-logo.png)
