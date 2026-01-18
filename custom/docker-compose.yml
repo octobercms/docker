@@ -1,8 +1,0 @@
-# docker-compose.yml
-version: '2.2'
-services:
-  web:
-    image: myoctober:latest
-    container_name: october
-    ports:
-      - 80:80

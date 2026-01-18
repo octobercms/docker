@@ -1,0 +1,133 @@
+# MySQL Template for October Docker
+# Provides MySQL database server within the container (uses MariaDB)
+
+params:
+  db_name: october
+  db_user: october
+  db_password: ""
+  db_root_password: ""
+  db_innodb_buffer_pool_size: "256M"
+  db_max_connections: 100
+  db_datadir: /shared/mysql
+
+env:
+  DB_CONNECTION: mysql
+  DB_HOST: "127.0.0.1"
+  DB_PORT: 3306
+  DB_DATABASE: $db_name
+  DB_USERNAME: $db_user
+  DB_PASSWORD: $db_password
+
+run:
+  # Install MariaDB (MySQL-compatible, available in Debian repos)
+  - exec:
+      cmd:
+        - |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y mariadb-server mariadb-client
+          rm -rf /var/lib/apt/lists/*
+
+  # Create MySQL configuration
+  - file:
+      path: /etc/mysql/conf.d/october.cnf
+      contents: |
+        [mysqld]
+        # Performance
+        innodb_buffer_pool_size = $db_innodb_buffer_pool_size
+        max_connections = $db_max_connections
+
+        # Character set
+        character-set-server = utf8mb4
+        collation-server = utf8mb4_unicode_ci
+
+        # Data directory
+        datadir = $db_datadir
+
+        # Logging
+        log_error = /var/log/mysql/error.log
+        slow_query_log = 1
+        slow_query_log_file = /var/log/mysql/slow.log
+        long_query_time = 2
+
+        # Security
+        local_infile = 0
+        skip-symbolic-links
+
+        # InnoDB settings
+        innodb_file_per_table = 1
+        innodb_flush_log_at_trx_commit = 2
+        innodb_log_buffer_size = 16M
+
+        [client]
+        default-character-set = utf8mb4
+
+  # Create data directory
+  - exec:
+      cmd:
+        - mkdir -p $db_datadir
+        - mkdir -p /var/log/mysql
+        - mkdir -p /var/run/mysqld
+        - chown -R mysql:mysql $db_datadir /var/log/mysql /var/run/mysqld
+
+  # Initialize MariaDB if data directory is empty
+  - exec:
+      cmd:
+        - |
+          if [ ! -d "$db_datadir/mysql" ]; then
+            echo "Initializing MariaDB data directory..."
+            mariadb-install-db --user=mysql --datadir=$db_datadir
+          fi
+
+  # Create supervisor config for MariaDB
+  - file:
+      path: /etc/supervisor/conf.d/mysql.conf
+      contents: |
+        [program:mysql]
+        command=/usr/sbin/mariadbd --user=mysql
+        autostart=true
+        autorestart=true
+        priority=10
+        startretries=5
+        startsecs=10
+        stdout_logfile=/var/log/supervisor/mysql-stdout.log
+        stderr_logfile=/var/log/supervisor/mysql-stderr.log
+
+  # Create initialization script
+  - file:
+      path: /etc/boot.d/01-mysql-init
+      chmod: "+x"
+      contents: |
+        #!/bin/bash
+        echo "[01-mysql-init] Starting MySQL initialization..."
+
+        # Wait for MySQL to start
+        max_tries=30
+        tries=0
+        echo "[01-mysql-init] Waiting for MySQL to be ready..."
+        while [ $tries -lt $max_tries ]; do
+          if mariadb-admin ping --silent 2>/dev/null; then
+            echo "[01-mysql-init] MySQL is ready after $tries attempts"
+            break
+          fi
+          tries=$((tries + 1))
+          echo "[01-mysql-init] Attempt $tries/$max_tries - MySQL not ready yet..."
+          sleep 1
+        done
+
+        if [ $tries -eq $max_tries ]; then
+          echo "[01-mysql-init] ERROR: MySQL failed to start after $max_tries attempts"
+          exit 1
+        fi
+
+        # Create database and user if they don't exist
+        echo "[01-mysql-init] Creating database and user..."
+        mariadb -u root <<SQLEOF
+        CREATE DATABASE IF NOT EXISTS $db_name CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+        CREATE USER IF NOT EXISTS '$db_user'@'localhost' IDENTIFIED BY '$db_password';
+        CREATE USER IF NOT EXISTS '$db_user'@'%' IDENTIFIED BY '$db_password';
+        GRANT ALL PRIVILEGES ON $db_name.* TO '$db_user'@'localhost';
+        GRANT ALL PRIVILEGES ON $db_name.* TO '$db_user'@'%';
+        FLUSH PRIVILEGES;
+        SQLEOF
+
+        echo "[01-mysql-init] MySQL initialization complete"

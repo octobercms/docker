@@ -1,1 +1,54 @@
+# October Docker .gitignore
+
+# User container configurations (contain secrets)
+containers/*.yml
+!containers/.gitkeep
+
+# Persistent data
+shared/
+!shared/.gitkeep
+
+# Container IDs
+cids/
+!cids/.gitkeep
+
+# Composer dependencies
+vendor/
+
+# PHP dependencies lock (optional, comment out if you want to lock versions)
+# composer.lock
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+
+# Environment files (if any)
 .env
+.env.local
+.env.*.local
+
+# Temporary files
+tmp/
+temp/
+cache/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Docker build artifacts
+*.tar
+*.tar.gz
