@@ -1,5 +1,5 @@
 # SSL Template for October Docker
-# Enables HTTPS with custom or Let's Encrypt certificates
+# Enables HTTPS with HTTP/2 support using custom or Let's Encrypt certificates
 
 params:
   ssl_cert_path: /shared/ssl/cert.pem
@@ -21,13 +21,16 @@ run:
         - mkdir -p /shared/ssl
         - mkdir -p /etc/apache2/ssl
 
-  # Create SSL virtual host
+  # Create SSL virtual host with HTTP/2
   - file:
       path: /etc/apache2/sites-available/october-ssl.conf
       contents: |
         <VirtualHost *:443>
             ServerAdmin webmaster@localhost
             DocumentRoot /var/www/october/public
+
+            # Enable HTTP/2 over SSL
+            Protocols h2 http/1.1
 
             # SSL Configuration
             SSLEngine on
@@ -43,6 +46,11 @@ run:
 
             # HSTS Header
             Header always set Strict-Transport-Security "max-age=63072000"
+
+            # Proxy PHP requests to PHP-FPM
+            <FilesMatch \.php$>
+                SetHandler "proxy:unix:/run/php/php-fpm.sock|fcgi://localhost"
+            </FilesMatch>
 
             <Directory /var/www/october/public>
                 Options -Indexes +FollowSymLinks

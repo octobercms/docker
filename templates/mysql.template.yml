@@ -120,13 +120,15 @@ run:
         fi
 
         # Create database and user if they don't exist
+        # Uses DB_* environment variables (exported from container env)
         echo "[01-mysql-init] Creating database and user..."
+        echo "[01-mysql-init] Database: $DB_DATABASE, User: $DB_USERNAME"
         mariadb -u root <<SQLEOF
-        CREATE DATABASE IF NOT EXISTS $db_name CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-        CREATE USER IF NOT EXISTS '$db_user'@'localhost' IDENTIFIED BY '$db_password';
-        CREATE USER IF NOT EXISTS '$db_user'@'%' IDENTIFIED BY '$db_password';
-        GRANT ALL PRIVILEGES ON $db_name.* TO '$db_user'@'localhost';
-        GRANT ALL PRIVILEGES ON $db_name.* TO '$db_user'@'%';
+        CREATE DATABASE IF NOT EXISTS \`$DB_DATABASE\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+        CREATE USER IF NOT EXISTS '$DB_USERNAME'@'localhost' IDENTIFIED BY '$DB_PASSWORD';
+        CREATE USER IF NOT EXISTS '$DB_USERNAME'@'%' IDENTIFIED BY '$DB_PASSWORD';
+        GRANT ALL PRIVILEGES ON \`$DB_DATABASE\`.* TO '$DB_USERNAME'@'localhost';
+        GRANT ALL PRIVILEGES ON \`$DB_DATABASE\`.* TO '$DB_USERNAME'@'%';
         FLUSH PRIVILEGES;
         SQLEOF
 

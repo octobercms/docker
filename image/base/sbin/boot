@@ -42,11 +42,32 @@ trap shutdown SIGTERM SIGHUP SIGINT
 
 log_info "Starting October Docker container..."
 
-# Ensure shared directories exist (these are outside the app directory)
+# Ensure shared directories exist with correct ownership
 log_info "Setting up directories..."
 mkdir -p /shared/log /shared/uploads /shared/storage /shared/mysql /shared/redis
-mkdir -p /var/log/october /var/log/supervisor
-chown -R october:www-data /shared 2>/dev/null || true
+mkdir -p /var/log/october /var/log/supervisor /run/php /var/run/mysqld
+
+# Set ownership for application directories
+chown -R october:www-data /shared/log /shared/uploads /shared/storage 2>/dev/null || true
+chown -R october:www-data /var/log/october 2>/dev/null || true
+
+# Set ownership for service data directories (critical for restarts)
+chown -R mysql:mysql /shared/mysql /var/run/mysqld 2>/dev/null || true
+chown -R redis:redis /shared/redis 2>/dev/null || true
+chown -R www-data:www-data /run/php 2>/dev/null || true
+
+# Ensure correct permissions
+chmod 755 /shared/mysql /shared/redis 2>/dev/null || true
+
+# Fix October storage permissions (critical for cache, sessions, views)
+if [ -d /var/www/october/storage ]; then
+    chown -R october:www-data /var/www/october/storage
+    chmod -R 775 /var/www/october/storage
+fi
+if [ -d /var/www/october/bootstrap/cache ]; then
+    chown -R october:www-data /var/www/october/bootstrap/cache
+    chmod -R 775 /var/www/october/bootstrap/cache
+fi
 
 # Note: boot.d scripts are run AFTER supervisor starts services
 # This allows database-dependent scripts to run after MySQL is available
@@ -120,7 +141,7 @@ if [ "$RUN_MIGRATIONS" = "true" ] || [ "$RUN_MIGRATIONS" = "1" ]; then
     if [ -f /var/www/october/artisan ]; then
         log_info "Running database migrations..."
         cd /var/www/october
-        sudo -u october php artisan migrate --force || log_warn "Migration failed or no migrations to run"
+        sudo -u october php artisan october:migrate --force || log_warn "Migration failed or no migrations to run"
     fi
 fi
 

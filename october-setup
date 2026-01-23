@@ -98,7 +98,7 @@ generate_app_key() {
 read_config() {
     local key="$1"
     local line=$(grep -E "^  #?$key:" "$CONFIG_FILE" 2>/dev/null || true)
-    local value=$(echo "$line" | sed 's/^[^:]*:[[:space:]]*//' | sed 's/^"\(.*\)"$/\1/' | sed "s/^'\(.*\)'$/\1/")
+    local value=$(echo "$line" | sed 's/^[^:]*:[[:space:]]*//' | sed 's/^"\(.*\)"$/\1/' | sed "s/^'\(.*\)'$/\1/" | tr -d '\r')
     echo "$value"
 }
 
@@ -109,10 +109,13 @@ update_config() {
     local value="$2"
     local changelog="/tmp/changelog.$$"
 
+    # Strip any existing quotes from value
+    value=$(echo "$value" | sed 's/^"\(.*\)"$/\1/' | sed "s/^'\(.*\)'$/\1/" | tr -d '\r')
+
     # Escape special characters in value for sed
     local escaped_value=$(echo "$value" | sed 's/[&/\]/\\&/g')
 
-    # Try to update the line
+    # Try to update the line (match with or without quotes, with or without \r)
     sed -i -e "s|^  #\?$key:.*|  $key: \"$escaped_value\"|w $changelog" "$CONFIG_FILE"
 
     if [ -s "$changelog" ]; then
@@ -312,12 +315,29 @@ select_sample() {
     echo "Available configurations:"
     echo
 
-    # Find all samples
+    # Build sample list with standalone configs first
     local samples=()
     local i=1
+
+    # Priority samples (shown first)
+    local priority_samples=("standalone.yml" "standalone-dev.yml")
+    for sample_name in "${priority_samples[@]}"; do
+        if [[ -f "$SAMPLES_DIR/$sample_name" ]]; then
+            local description=$(get_sample_description "$sample_name")
+            samples+=("$sample_name")
+            echo "  $i) $sample_name"
+            echo "     $description"
+            echo
+            ((i++))
+        fi
+    done
+
+    # Remaining samples from directory
     for sample_file in "$SAMPLES_DIR"/*.yml; do
         [[ -f "$sample_file" ]] || continue
         local sample_name=$(basename "$sample_file")
+        # Skip if already added as priority
+        [[ " ${priority_samples[*]} " =~ " ${sample_name} " ]] && continue
         local description=$(get_sample_description "$sample_name")
         samples+=("$sample_name")
         echo "  $i) $sample_name"
@@ -710,6 +730,7 @@ main() {
     fi
 
     # Check for existing config
+    BACKUP_FILE=""
     if [ -f "$CONFIG_FILE" ]; then
         echo "The configuration file $CONFIG_FILE already exists!"
         echo
@@ -721,14 +742,43 @@ main() {
         echo
         DATE=$(date +"%Y-%m-%d-%H%M%S")
         BACKUP="$APP_NAME.yml.$DATE.bak"
+        BACKUP_FILE="$CONTAINERS_DIR/$BACKUP"
         echo "Saving old file as $BACKUP"
-        cp "$CONFIG_FILE" "$CONTAINERS_DIR/$BACKUP"
+        cp "$CONFIG_FILE" "$BACKUP_FILE"
         echo
-    else
-        # Copy sample file to containers directory
-        info "Creating configuration from $SELECTED_SAMPLE..."
-        cp "$SAMPLE_FILE" "$CONFIG_FILE"
-        chmod 600 "$CONFIG_FILE"
+    fi
+
+    # Copy sample file to containers directory (fresh copy for new or reconfigure)
+    info "Creating configuration from $SELECTED_SAMPLE..."
+    cp "$SAMPLE_FILE" "$CONFIG_FILE"
+    chmod 600 "$CONFIG_FILE"
+
+    # If reconfiguring, restore credentials from backup to avoid breaking existing database
+    if [ -n "$BACKUP_FILE" ]; then
+        info "Preserving credentials from previous configuration..."
+
+        # Read credentials from backup
+        local old_db_password=$(grep -E "^  db_password:" "$BACKUP_FILE" 2>/dev/null | sed 's/^[^:]*:[[:space:]]*//' | sed 's/^"\(.*\)"$/\1/' | tr -d '\r')
+        local old_db_root_password=$(grep -E "^  db_root_password:" "$BACKUP_FILE" 2>/dev/null | sed 's/^[^:]*:[[:space:]]*//' | sed 's/^"\(.*\)"$/\1/' | tr -d '\r')
+        local old_app_key=$(grep -E "^  APP_KEY:" "$BACKUP_FILE" 2>/dev/null | sed 's/^[^:]*:[[:space:]]*//' | sed 's/^"\(.*\)"$/\1/' | tr -d '\r')
+
+        # Restore db_password if it was a real password (not a placeholder)
+        if [[ -n "$old_db_password" ]] && [[ "$old_db_password" != *"CHANGE_THIS"* ]]; then
+            update_config "db_password" "$old_db_password" && echo "  Restored db_password"
+            update_config "DB_PASSWORD" "$old_db_password" && echo "  Restored DB_PASSWORD"
+        fi
+
+        # Restore db_root_password if it was a real password
+        if [[ -n "$old_db_root_password" ]] && [[ "$old_db_root_password" != *"CHANGE_THIS"* ]]; then
+            update_config "db_root_password" "$old_db_root_password" && echo "  Restored db_root_password"
+        fi
+
+        # Restore APP_KEY if it was a real key
+        if [[ -n "$old_app_key" ]] && [[ "$old_app_key" != *"CHANGE_THIS"* ]] && [[ "$old_app_key" != *"GENERATE"* ]]; then
+            update_config "APP_KEY" "$old_app_key" && echo "  Restored APP_KEY"
+        fi
+
+        echo
     fi
 
     # Scale resources based on system

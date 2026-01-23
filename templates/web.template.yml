@@ -1,5 +1,6 @@
 # Web Template for October Docker
 # Core web server and October CMS application setup
+# Uses Apache with event MPM + PHP-FPM for HTTP/2 support
 
 base_image: octobercms/base:1.0
 
@@ -15,6 +16,12 @@ params:
   # Performance
   opcache_memory: 256
   opcache_max_files: 20000
+
+  # PHP-FPM settings
+  fpm_max_children: 50
+  fpm_start_servers: 5
+  fpm_min_spare_servers: 5
+  fpm_max_spare_servers: 35
 
 env:
   APP_NAME: "October CMS"
@@ -86,13 +93,42 @@ run:
         opcache.jit = tracing
         opcache.jit_buffer_size = 128M
 
-  # Apache configuration
+  # PHP-FPM pool configuration
+  - file:
+      path: /usr/local/etc/php-fpm.d/www.conf
+      contents: |
+        [www]
+        user = www-data
+        group = www-data
+        listen = /run/php/php-fpm.sock
+        listen.owner = www-data
+        listen.group = www-data
+        listen.mode = 0660
+        pm = dynamic
+        pm.max_children = $fpm_max_children
+        pm.start_servers = $fpm_start_servers
+        pm.min_spare_servers = $fpm_min_spare_servers
+        pm.max_spare_servers = $fpm_max_spare_servers
+        pm.max_requests = 500
+        catch_workers_output = yes
+        php_admin_flag[log_errors] = on
+        php_admin_value[error_log] = /var/log/october/php-fpm-error.log
+
+  # Apache configuration with HTTP/2
   - file:
       path: /etc/apache2/sites-available/october.conf
       contents: |
         <VirtualHost *:80>
             ServerAdmin webmaster@localhost
             DocumentRoot $home/public
+
+            # Enable HTTP/2 (h2c for cleartext)
+            Protocols h2c http/1.1
+
+            # Proxy PHP requests to PHP-FPM
+            <FilesMatch \.php$>
+                SetHandler "proxy:unix:/run/php/php-fpm.sock|fcgi://localhost"
+            </FilesMatch>
 
             <Directory $home/public>
                 Options -Indexes +FollowSymLinks
@@ -147,24 +183,6 @@ run:
       cmd:
         - sudo -u october php artisan october:mirror public --relative
 
-  # Symlink persistent storage to shared volume
-  - exec:
-      cd: $home
-      cmd:
-        - |
-          # Link uploads to shared storage for persistence
-          if [ -d "/shared/uploads" ]; then
-            ln -sfn /shared/uploads storage/app/uploads
-          fi
-          # Link plugins to shared storage for persistence
-          if [ -d "/shared/plugins" ]; then
-            ln -sfn /shared/plugins plugins
-          fi
-          # Link themes to shared storage for persistence
-          if [ -d "/shared/themes" ]; then
-            ln -sfn /shared/themes themes
-          fi
-
   # Set permissions
   - exec:
       cd: $home
@@ -175,28 +193,149 @@ run:
         - chmod -R 775 storage bootstrap/cache
         - chmod +x artisan 2>/dev/null || true
 
-  # Create migration boot script (runs after MySQL is started by supervisor)
+  # Ensure PHP-FPM socket directory exists
+  - exec:
+      cmd:
+        - mkdir -p /run/php
+        - chown www-data:www-data /run/php
+
+  # Populate empty volume mounts with defaults from image
   - file:
-      path: /etc/boot.d/10-october-migrate
+      path: /etc/boot.d/05-october-defaults
       chmod: "+x"
       contents: |
         #!/bin/bash
-        echo "[10-october-migrate] Starting migration script..."
+        echo "[05-october-defaults] Checking for empty mounts..."
         cd /var/www/october
-        echo "[10-october-migrate] Current directory: $(pwd)"
-        echo "[10-october-migrate] Checking for .env file..."
-        if [ -f .env ]; then
-          echo "[10-october-migrate] .env found, running migrations..."
-          sudo -u october php artisan october:migrate 2>&1
-          echo "[10-october-migrate] Migration exit code: $?"
-        else
-          echo "[10-october-migrate] No .env file found, skipping migrations"
+
+        # Populate themes if empty
+        if [ -d "themes" ] && [ -z "$(ls -A themes 2>/dev/null)" ]; then
+          if [ -d "/var/october-defaults/themes" ] && [ -n "$(ls -A /var/october-defaults/themes 2>/dev/null)" ]; then
+            echo "[05-october-defaults] Populating themes from image defaults..."
+            cp -a /var/october-defaults/themes/* themes/
+            chown -R october:www-data themes/
+          fi
         fi
-        echo "[10-october-migrate] Migration script complete"
+
+        # Populate plugins if empty
+        if [ -d "plugins" ] && [ -z "$(ls -A plugins 2>/dev/null)" ]; then
+          if [ -d "/var/october-defaults/plugins" ] && [ -n "$(ls -A /var/october-defaults/plugins 2>/dev/null)" ]; then
+            echo "[05-october-defaults] Populating plugins from image defaults..."
+            cp -a /var/october-defaults/plugins/* plugins/
+            chown -R october:www-data plugins/
+          fi
+        fi
+
+        echo "[05-october-defaults] Done"
+
+  # Create .env file from .env.example and merge environment variables
+  - file:
+      path: /etc/boot.d/10-october-env
+      chmod: "+x"
+      contents: |
+        #!/bin/bash
+        echo "[10-october-env] Creating .env file..."
+        cd /var/www/october
+
+        # Always start fresh from .env.example (yaml config is source of truth)
+        if [ -f .env.example ]; then
+          echo "[10-october-env] Copying .env.example to .env"
+          cp .env.example .env
+          chown october:www-data .env
+          chmod 644 .env
+        else
+          echo "[10-october-env] ERROR: No .env.example found!"
+          exit 1
+        fi
+
+        # Update .env with container environment variables
+        # Only update if the env var is set and non-empty
+        update_env() {
+          local key="$1"
+          local value="${!key}"
+          if [ -n "$value" ]; then
+            # Quote value if it contains spaces or special characters
+            local quoted_value="$value"
+            if [[ "$value" =~ [[:space:]\(\)\#\&\|\<\>\;\$\`] ]]; then
+              quoted_value="\"$value\""
+            fi
+            # Escape special characters for sed
+            local escaped_value=$(printf '%s\n' "$quoted_value" | sed -e 's/[\/&]/\\&/g')
+            if grep -q "^${key}=" .env; then
+              sed -i "s|^${key}=.*|${key}=${escaped_value}|" .env
+            else
+              echo "${key}=${quoted_value}" >> .env
+            fi
+          fi
+        }
+
+        echo "[10-october-env] Merging environment variables..."
+
+        # Application settings
+        update_env APP_NAME
+        update_env APP_ENV
+        update_env APP_KEY
+        update_env APP_DEBUG
+        update_env APP_URL
+        update_env APP_TIMEZONE
+        update_env APP_LOCALE
+
+        # Database settings
+        update_env DB_CONNECTION
+        update_env DB_HOST
+        update_env DB_PORT
+        update_env DB_DATABASE
+        update_env DB_USERNAME
+        update_env DB_PASSWORD
+
+        # Cache/Session/Queue
+        update_env CACHE_DRIVER
+        update_env SESSION_DRIVER
+        update_env QUEUE_CONNECTION
+
+        # Redis
+        update_env REDIS_HOST
+        update_env REDIS_PORT
+        update_env REDIS_PASSWORD
+
+        # Logging
+        update_env LOG_CHANNEL
+        update_env LOG_LEVEL
+
+        # Mail (if configured)
+        update_env MAIL_MAILER
+        update_env MAIL_HOST
+        update_env MAIL_PORT
+        update_env MAIL_USERNAME
+        update_env MAIL_PASSWORD
+        update_env MAIL_ENCRYPTION
+        update_env MAIL_FROM_ADDRESS
+        update_env MAIL_FROM_NAME
+
+        echo "[10-october-env] .env file ready"
+
+  # Create migration boot script (runs after MySQL is started by supervisor)
+  - file:
+      path: /etc/boot.d/20-october-migrate
+      chmod: "+x"
+      contents: |
+        #!/bin/bash
+        echo "[20-october-migrate] Starting migration script..."
+        cd /var/www/october
+        echo "[20-october-migrate] Current directory: $(pwd)"
+        echo "[20-october-migrate] Checking for .env file..."
+        if [ -f .env ]; then
+          echo "[20-october-migrate] .env found, running migrations..."
+          sudo -u october php artisan october:migrate 2>&1
+          echo "[20-october-migrate] Migration exit code: $?"
+        else
+          echo "[20-october-migrate] No .env file found, skipping migrations"
+        fi
+        echo "[20-october-migrate] Migration script complete"
 
   # Create optimization boot script (runs after migrations)
   - file:
-      path: /etc/boot.d/20-october-optimize
+      path: /etc/boot.d/30-october-optimize
       chmod: "+x"
       contents: |
         #!/bin/bash

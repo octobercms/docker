@@ -7,8 +7,8 @@
 # - Source code can be mounted from host for live editing
 #
 # Usage:
-#   1. Copy this file to containers/dev.yml
-#   2. Run: ./launcher bootstrap dev
+#   1. Copy this file to containers/app.yml
+#   2. Run: ./launcher bootstrap app
 #   3. Access your site at http://localhost
 #   4. Connect your IDE to Xdebug on port 9003
 

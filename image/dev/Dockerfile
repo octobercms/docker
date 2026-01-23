@@ -19,18 +19,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Node.js for frontend development
     nodejs \
     npm \
-    # SQLite for testing
-    sqlite3 \
-    libsqlite3-dev \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# Install Xdebug
-RUN pecl install xdebug \
-    && docker-php-ext-enable xdebug
-
-# Install SQLite extension for testing
-RUN docker-php-ext-install pdo_sqlite
+# Install Xdebug (skip if already installed)
+RUN if ! php -m | grep -q xdebug; then \
+        pecl install xdebug && docker-php-ext-enable xdebug; \
+    fi
 
 # PHP development configuration
 RUN cat > /usr/local/etc/php/conf.d/99-dev.ini <<'EOF'
@@ -104,7 +99,7 @@ RUN cat > /usr/local/bin/xdebug-on <<'EOF'
 #!/bin/bash
 echo "Enabling Xdebug..."
 phpenmod xdebug
-apache2ctl graceful
+supervisorctl restart php-fpm
 echo "Xdebug enabled"
 EOF
 RUN chmod +x /usr/local/bin/xdebug-on
@@ -113,7 +108,7 @@ RUN cat > /usr/local/bin/xdebug-off <<'EOF'
 #!/bin/bash
 echo "Disabling Xdebug..."
 phpdismod xdebug
-apache2ctl graceful
+supervisorctl restart php-fpm
 echo "Xdebug disabled"
 EOF
 RUN chmod +x /usr/local/bin/xdebug-off
