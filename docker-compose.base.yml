@@ -1,0 +1,70 @@
+# October CMS Docker - Base Configuration
+# This file is used as a template by the launcher script
+# Environment variables are substituted at runtime
+
+services:
+  web:
+    build:
+      context: ./docker/web
+      dockerfile: Dockerfile
+      args:
+        ENVIRONMENT: ${ENVIRONMENT:-development}
+    container_name: ${SITE_NAME}_web
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ${SITE_PATH}:/var/www/html
+    env_file:
+      - ${SITE_PATH}/.env
+    environment:
+      - APP_ENV=${APP_ENV:-local}
+      - APP_DEBUG=${APP_DEBUG:-true}
+      - DB_HOST=${DB_HOST:-mariadb}
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - XDEBUG_MODE=${XDEBUG_MODE:-off}
+      - OPCACHE_ENABLE=${OPCACHE_ENABLE:-1}
+      - OPCACHE_VALIDATE_TIMESTAMPS=${OPCACHE_VALIDATE_TIMESTAMPS:-1}
+      - OPCACHE_REVALIDATE_FREQ=${OPCACHE_REVALIDATE_FREQ:-2}
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - october_network
+    restart: unless-stopped
+
+  mariadb:
+    image: mariadb:10.11
+    container_name: ${SITE_NAME}_mariadb
+    volumes:
+      - ${SITE_PATH}/.data/mysql:/var/lib/mysql
+    env_file:
+      - ${SITE_PATH}/.env
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - october_network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: ${SITE_NAME}_redis
+    volumes:
+      - ${SITE_PATH}/.data/redis:/data
+    command: redis-server --appendonly yes
+    networks:
+      - october_network
+    restart: unless-stopped
+
+networks:
+  october_network:
+    driver: bridge

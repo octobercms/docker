@@ -1,0 +1,14 @@
+# Force Unix line endings for shell scripts
+*.sh text eol=lf
+launcher text eol=lf
+october-setup text eol=lf
+
+# Force Unix line endings for config files used by containers
+*.conf text eol=lf
+*.ini text eol=lf
+Dockerfile text eol=lf
+
+# Keep Windows line endings for Windows-specific files
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf

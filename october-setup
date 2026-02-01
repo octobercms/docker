@@ -1,47 +1,50 @@
 #!/usr/bin/env bash
 #
-# October Docker Setup Wizard
-# Interactive setup for October CMS Docker deployment
-#
-# No host dependencies beyond Bash and Docker
+# October CMS Docker Setup
+# Creates a new site configuration and initializes the site directory
 #
 
 set -e
 
-# Paths
+# Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONTAINERS_DIR="$SCRIPT_DIR/containers"
-SAMPLES_DIR="$SCRIPT_DIR/samples"
-
-# Config name (default: app)
-APP_NAME="app"
-
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m'
 
 ##############################################################################
 # Helper Functions
 ##############################################################################
 
+# Colors (only if terminal supports it)
+if [ -t 1 ]; then
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    CYAN='\033[0;36m'
+    BOLD='\033[1m'
+    NC='\033[0m' # No Color
+else
+    RED=''
+    GREEN=''
+    YELLOW=''
+    CYAN=''
+    BOLD=''
+    NC=''
+fi
+
 info() {
-    echo -e "${CYAN}INFO:${NC} $1"
+    printf "${CYAN}INFO:${NC} %b\n" "$1"
 }
 
 success() {
-    echo -e "${GREEN}SUCCESS:${NC} $1"
+    printf "${GREEN}SUCCESS:${NC} %b\n" "$1"
 }
 
 warning() {
-    echo -e "${YELLOW}WARNING:${NC} $1"
+    printf "${YELLOW}WARNING:${NC} %b\n" "$1"
 }
 
 error() {
-    echo -e "${RED}ERROR:${NC} $1"
+    printf "${RED}ERROR:${NC} %b\n" "$1"
 }
 
 fatal() {
@@ -49,767 +52,624 @@ fatal() {
     exit 1
 }
 
-# Ask a question with optional default
-ask() {
+# Generate a random password
+generate_password() {
+    local length="${1:-32}"
+    LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c "$length"
+}
+
+# Generate a base64 app key
+generate_app_key() {
+    LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 32 | base64
+}
+
+# Expand ~ to home directory
+expand_path() {
+    local path="$1"
+    echo "${path/#\~/$HOME}"
+}
+
+show_help() {
+    printf "${BOLD}October CMS Docker Setup${NC}\n"
+    cat << 'EOF'
+
+Usage: ./october-setup <site_name> [options]
+
+Creates a new October CMS site configuration.
+
+Arguments:
+  site_name       Name for your site (e.g., blog, shop, myapp)
+                  Used for container names and default directory
+
+Options:
+  --help, -h      Show this help message
+
+Examples:
+  ./october-setup blog          # Interactive setup for a new site
+  ./october-setup shop          # Create another site
+
+After setup, start your site with:
+  ./launcher start <site_name>
+EOF
+}
+
+# Parse a value from a YAML config file (simple key: value format)
+parse_config_value() {
+    local file="$1"
+    local key="$2"
+    grep "^${key}:" "$file" 2>/dev/null | sed 's/^[^:]*:[[:space:]]*//'
+}
+
+# Load existing config into variables
+load_existing_config() {
+    local config_file="$1"
+
+    ENVIRONMENT=$(parse_config_value "$config_file" "environment")
+    SITE_PATH=$(parse_config_value "$config_file" "site_path")
+    HTTP_PORT=$(parse_config_value "$config_file" "http_port")
+    HTTPS_PORT=$(parse_config_value "$config_file" "https_port")
+    HOSTNAME=$(parse_config_value "$config_file" "hostname")
+    SSL_MODE=$(parse_config_value "$config_file" "ssl_mode")
+    LETSENCRYPT_EMAIL=$(parse_config_value "$config_file" "letsencrypt_email")
+
+    # Parse services section (simple approach)
+    USE_MARIADB=$(grep "mariadb:" "$config_file" 2>/dev/null | grep -v "^#" | tail -1 | sed 's/.*:[[:space:]]*//')
+    USE_REDIS=$(grep "redis:" "$config_file" 2>/dev/null | grep -v "^#" | tail -1 | sed 's/.*:[[:space:]]*//')
+
+    # Default to true if not specified
+    USE_MARIADB="${USE_MARIADB:-true}"
+    USE_REDIS="${USE_REDIS:-true}"
+}
+
+##############################################################################
+# Input Functions
+##############################################################################
+
+ask_yes_no() {
+    local prompt="$1"
+    local default="${2:-y}"
+    local response
+
+    if [ "$default" = "y" ]; then
+        prompt="$prompt [Y/n]: "
+    else
+        prompt="$prompt [y/N]: "
+    fi
+
+    read -p "$prompt" response
+    response="${response:-$default}"
+
+    [[ "$response" =~ ^[Yy] ]]
+}
+
+ask_input() {
     local prompt="$1"
     local default="$2"
-    local result
+    local response
 
-    if [[ -n "$default" ]]; then
-        read -p "$prompt [$default]: " result
-        echo "${result:-$default}"
+    if [ -n "$default" ]; then
+        read -p "$prompt [$default]: " response
+        echo "${response:-$default}"
     else
-        read -p "$prompt: " result
-        echo "$result"
+        read -p "$prompt: " response
+        echo "$response"
     fi
 }
 
-# Ask yes/no question
-confirm() {
+ask_choice() {
     local prompt="$1"
-    local default="${2:-n}"
-    local yn_prompt
+    shift
+    local options=("$@")
 
-    if [[ "$default" == "y" ]]; then
-        yn_prompt="[Y/n]"
-    else
-        yn_prompt="[y/N]"
-    fi
+    echo "" >&2
+    echo "$prompt" >&2
+    echo "" >&2
 
-    read -p "$prompt $yn_prompt: " answer
-    answer="${answer:-$default}"
-
-    [[ "$answer" =~ ^[Yy] ]]
-}
-
-# Generate random string
-random_string() {
-    local length="${1:-32}"
-    cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w "$length" | head -n 1
-}
-
-# Generate Laravel-compatible APP_KEY
-generate_app_key() {
-    local key=$(random_string 32)
-    echo "base64:$(echo -n "$key" | base64)"
-}
-
-# Read a value from the config file
-read_config() {
-    local key="$1"
-    local line=$(grep -E "^  #?$key:" "$CONFIG_FILE" 2>/dev/null || true)
-    local value=$(echo "$line" | sed 's/^[^:]*:[[:space:]]*//' | sed 's/^"\(.*\)"$/\1/' | sed "s/^'\(.*\)'$/\1/" | tr -d '\r')
-    echo "$value"
-}
-
-# Update a value in the config file using sed
-# Returns 0 if change was made, 1 otherwise
-update_config() {
-    local key="$1"
-    local value="$2"
-    local changelog="/tmp/changelog.$$"
-
-    # Strip any existing quotes from value
-    value=$(echo "$value" | sed 's/^"\(.*\)"$/\1/' | sed "s/^'\(.*\)'$/\1/" | tr -d '\r')
-
-    # Escape special characters in value for sed
-    local escaped_value=$(echo "$value" | sed 's/[&/\]/\\&/g')
-
-    # Try to update the line (match with or without quotes, with or without \r)
-    sed -i -e "s|^  #\?$key:.*|  $key: \"$escaped_value\"|w $changelog" "$CONFIG_FILE"
-
-    if [ -s "$changelog" ]; then
-        rm -f "$changelog"
-        return 0
-    else
-        rm -f "$changelog"
-        return 1
-    fi
-}
-
-# Update a value without quotes (for booleans, numbers)
-update_config_raw() {
-    local key="$1"
-    local value="$2"
-    local changelog="/tmp/changelog.$$"
-
-    sed -i -e "s|^  #\?$key:.*|  $key: $value|w $changelog" "$CONFIG_FILE"
-
-    if [ -s "$changelog" ]; then
-        rm -f "$changelog"
-        return 0
-    else
-        rm -f "$changelog"
-        return 1
-    fi
-}
-
-# Uncomment a template line
-enable_template() {
-    local template="$1"
-    local changelog="/tmp/changelog.$$"
-
-    # Escape slashes for sed
-    local escaped_template=$(echo "$template" | sed 's/\//\\\//g')
-
-    # Match commented line and uncomment it
-    sed -i -e "s|^  # *- \"$escaped_template\"|  - \"$escaped_template\"|w $changelog" "$CONFIG_FILE"
-
-    if [ -s "$changelog" ]; then
-        rm -f "$changelog"
-        return 0
-    else
-        rm -f "$changelog"
-        return 1
-    fi
-}
-
-# Uncomment a port expose line
-enable_port() {
-    local port="$1"
-    local changelog="/tmp/changelog.$$"
-
-    sed -i -e "s|^  # *- \"$port\"|  - \"$port\"|w $changelog" "$CONFIG_FILE"
-
-    if [ -s "$changelog" ]; then
-        rm -f "$changelog"
-        return 0
-    else
-        rm -f "$changelog"
-        return 1
-    fi
-}
-
-# Uncomment an env variable line
-enable_env() {
-    local key="$1"
-    local changelog="/tmp/changelog.$$"
-
-    sed -i -e "s|^  # *$key:|  $key:|w $changelog" "$CONFIG_FILE"
-
-    if [ -s "$changelog" ]; then
-        rm -f "$changelog"
-        return 0
-    else
-        rm -f "$changelog"
-        return 1
-    fi
-}
-
-##############################################################################
-# Prerequisites Check
-##############################################################################
-
-check_docker() {
-    if ! command -v docker &> /dev/null; then
-        echo -e "${RED}NOT FOUND${NC}"
-        error "Docker is required. Please install Docker first."
-        return 1
-    fi
-
-    if ! docker info &> /dev/null; then
-        echo -e "${RED}NOT RUNNING${NC}"
-        error "Docker daemon is not running. Please start Docker."
-        return 1
-    fi
-
-    return 0
-}
-
-check_prerequisites() {
-    info "Checking prerequisites..."
-    echo
-
-    # Check Docker
-    echo -n "  Docker: "
-    if check_docker; then
-        local version=$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo "unknown")
-        echo -e "${GREEN}OK${NC} (v$version)"
-    else
-        return 1
-    fi
-
-    # Check disk space
-    echo -n "  Disk space: "
-    local free_gb=$(df -BG . 2>/dev/null | awk 'NR==2 {print $4}' | tr -d 'G' || echo "0")
-    if [[ "$free_gb" -ge 5 ]]; then
-        echo -e "${GREEN}OK${NC} (${free_gb}GB free)"
-    elif [[ "$free_gb" -ge 2 ]]; then
-        echo -e "${YELLOW}WARNING${NC} (${free_gb}GB free)"
-        warning "Recommended: at least 5GB free disk space"
-    else
-        echo -e "${RED}LOW${NC} (${free_gb}GB free)"
-        error "Insufficient disk space. At least 2GB required."
-        return 1
-    fi
-
-    # Check memory
-    echo -n "  System memory: "
-    local mem_mb=0
-    if [[ -f /proc/meminfo ]]; then
-        mem_mb=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
-    elif command -v sysctl &> /dev/null; then
-        mem_mb=$(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1024 / 1024 ))
-    fi
-
-    if [[ "$mem_mb" -ge 2048 ]]; then
-        echo -e "${GREEN}OK${NC} ($((mem_mb/1024))GB)"
-    elif [[ "$mem_mb" -ge 1024 ]]; then
-        echo -e "${YELLOW}WARNING${NC} ($((mem_mb/1024))GB)"
-        warning "Recommended: at least 2GB RAM"
-    else
-        echo -e "${YELLOW}UNKNOWN${NC}"
-    fi
-
-    echo
-    return 0
-}
-
-##############################################################################
-# Sample Selection
-##############################################################################
-
-# Sample descriptions for menu display
-get_sample_description() {
-    local sample="$1"
-    case "$sample" in
-        standalone.yml)
-            echo "All-in-one: MySQL + Redis + Web (recommended for most users)"
-            ;;
-        standalone-dev.yml)
-            echo "Development: Xdebug, debug mode, development settings"
-            ;;
-        web-only.yml)
-            echo "Web only: Connect to external MySQL and Redis"
-            ;;
-        data.yml)
-            echo "Data only: MySQL + Redis server (use with web-only)"
-            ;;
-        *)
-            echo "Custom configuration"
-            ;;
-    esac
-}
-
-# Get recommended config name for a sample
-# Multi-container setups (data.yml, web-only.yml) need distinct names
-# Standalone configs always default to "app"
-get_default_config_name() {
-    local sample="$1"
-    case "$sample" in
-        web-only.yml)
-            echo "web"
-            ;;
-        data.yml)
-            echo "data"
-            ;;
-        *)
-            echo "app"
-            ;;
-    esac
-}
-
-select_sample() {
-    echo -e "${BOLD}=== Select Configuration Type ===${NC}"
-    echo
-    echo "Available configurations:"
-    echo
-
-    # Build sample list with standalone configs first
-    local samples=()
     local i=1
-
-    # Priority samples (shown first)
-    local priority_samples=("standalone.yml" "standalone-dev.yml")
-    for sample_name in "${priority_samples[@]}"; do
-        if [[ -f "$SAMPLES_DIR/$sample_name" ]]; then
-            local description=$(get_sample_description "$sample_name")
-            samples+=("$sample_name")
-            echo "  $i) $sample_name"
-            echo "     $description"
-            echo
-            ((i++))
-        fi
-    done
-
-    # Remaining samples from directory
-    for sample_file in "$SAMPLES_DIR"/*.yml; do
-        [[ -f "$sample_file" ]] || continue
-        local sample_name=$(basename "$sample_file")
-        # Skip if already added as priority
-        [[ " ${priority_samples[*]} " =~ " ${sample_name} " ]] && continue
-        local description=$(get_sample_description "$sample_name")
-        samples+=("$sample_name")
-        echo "  $i) $sample_name"
-        echo "     $description"
-        echo
+    for opt in "${options[@]}"; do
+        echo "  $i) $opt" >&2
         ((i++))
     done
+    echo "" >&2
 
-    if [[ ${#samples[@]} -eq 0 ]]; then
-        fatal "No sample configurations found in $SAMPLES_DIR"
-    fi
-
-    # Ask user to select
-    local selection
+    local choice
     while true; do
-        read -p "Select configuration [1]: " selection
-        selection="${selection:-1}"
-
-        if [[ "$selection" =~ ^[0-9]+$ ]] && [[ "$selection" -ge 1 ]] && [[ "$selection" -le ${#samples[@]} ]]; then
-            SELECTED_SAMPLE="${samples[$((selection-1))]}"
-            SAMPLE_FILE="$SAMPLES_DIR/$SELECTED_SAMPLE"
-            break
-        else
-            error "Invalid selection. Please enter a number between 1 and ${#samples[@]}"
+        read -p "Enter choice [1-${#options[@]}]: " choice
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#options[@]}" ]; then
+            echo "$choice"
+            return
         fi
+        echo "Please enter a number between 1 and ${#options[@]}" >&2
+    done
+}
+
+##############################################################################
+# Setup Functions
+##############################################################################
+
+setup_development() {
+    local site_name="$1"
+
+    echo ""
+    printf "${BOLD}Development Environment Setup${NC}\n"
+    echo "------------------------------"
+    echo ""
+
+    # Site path - default to ~/october-sites/{name}
+    local default_path="~/october-sites/$site_name"
+    SITE_PATH=$(ask_input "Site directory" "$default_path")
+
+    # HTTP port
+    HTTP_PORT=$(ask_input "HTTP port" "80")
+
+    # Custom October repo (optional)
+    echo ""
+    if ask_yes_no "Install from a custom Git repository?" "n"; then
+        OCTOBER_REPO=$(ask_input "Git repository URL" "")
+    else
+        OCTOBER_REPO=""
+    fi
+
+    # Development settings (fixed)
+    ENVIRONMENT="development"
+    HTTPS_PORT=""
+    SSL_MODE="none"
+    USE_MARIADB="true"
+    USE_REDIS="true"
+    HOSTNAME="localhost"
+}
+
+setup_production() {
+    local site_name="$1"
+
+    echo ""
+    printf "${BOLD}Production Environment Setup${NC}\n"
+    echo "-----------------------------"
+    echo ""
+
+    # Hostname
+    HOSTNAME=$(ask_input "Domain name (e.g., forum.example.com)" "")
+    while [ -z "$HOSTNAME" ]; do
+        error "Domain name is required for production"
+        HOSTNAME=$(ask_input "Domain name" "")
     done
 
-    echo
-    info "Selected: $SELECTED_SAMPLE"
-    echo
+    # Site path
+    local default_path="~/october-sites/$site_name"
+    SITE_PATH=$(ask_input "Site directory" "$default_path")
 
-    # Suggest default config name based on sample
-    local suggested_name=$(get_default_config_name "$SELECTED_SAMPLE")
-    APP_NAME=$(ask "Configuration name" "$suggested_name")
+    # Ports
+    HTTP_PORT=$(ask_input "HTTP port" "80")
+    HTTPS_PORT=$(ask_input "HTTPS port" "443")
 
-    # Validate config name
-    if [[ ! "$APP_NAME" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-        fatal "Invalid config name '$APP_NAME'. Use only letters, numbers, underscores, and hyphens."
-    fi
+    # SSL
+    echo ""
+    local ssl_choice=$(ask_choice "SSL Certificate" \
+        "Let's Encrypt (automatic, recommended)" \
+        "Custom certificate (provide your own)" \
+        "None (HTTP only, not recommended)")
 
-    CONFIG_FILE="$CONTAINERS_DIR/$APP_NAME.yml"
-    echo
-}
+    case "$ssl_choice" in
+        1)
+            SSL_MODE="letsencrypt"
+            LETSENCRYPT_EMAIL=$(ask_input "Email for Let's Encrypt notifications" "")
+            while [ -z "$LETSENCRYPT_EMAIL" ]; do
+                error "Email is required for Let's Encrypt"
+                LETSENCRYPT_EMAIL=$(ask_input "Email" "")
+            done
+            ;;
+        2)
+            SSL_MODE="custom"
+            warning "You will need to mount your certificates into the container"
+            ;;
+        3)
+            SSL_MODE="none"
+            warning "Running production without SSL is not recommended"
+            ;;
+    esac
 
-##############################################################################
-# Resource Scaling (auto-tune based on system resources)
-##############################################################################
+    # Database
+    echo ""
+    local db_choice=$(ask_choice "Database" \
+        "Bundled MariaDB (runs in container)" \
+        "External database (AWS RDS, etc.)")
 
-scale_resources() {
-    local changelog="/tmp/changelog.$$"
-
-    # Get system memory in GB
-    local avail_gb=2
-    if [[ -f /proc/meminfo ]]; then
-        local mem_mb=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
-        avail_gb=$((mem_mb / 1024))
-    elif command -v sysctl &> /dev/null; then
-        local mem_bytes=$(sysctl -n hw.memsize 2>/dev/null || echo 0)
-        avail_gb=$((mem_bytes / 1024 / 1024 / 1024))
-    fi
-
-    echo "Found ${avail_gb}GB of memory"
-
-    # db_innodb_buffer_pool_size: 128MB for 1GB, 256MB for 2GB, or 256MB * GB, max 512MB
-    local db_buffer
-    if [ "$avail_gb" -eq "1" ]; then
-        db_buffer=128
-    elif [ "$avail_gb" -eq "2" ]; then
-        db_buffer=256
+    if [ "$db_choice" = "1" ]; then
+        USE_MARIADB="true"
+        EXT_DB_HOST=""
     else
-        db_buffer=$(( 256 * avail_gb ))
-    fi
-    [ "$db_buffer" -gt 512 ] && db_buffer=512
-
-    sed -i -e "s|^  db_innodb_buffer_pool_size:.*|  db_innodb_buffer_pool_size: \"${db_buffer}M\"|w $changelog" "$CONFIG_FILE"
-    if [ -s "$changelog" ]; then
-        echo "Setting db_innodb_buffer_pool_size = ${db_buffer}M"
-        rm -f "$changelog"
+        USE_MARIADB="false"
+        EXT_DB_HOST=$(ask_input "Database host" "")
+        EXT_DB_PORT=$(ask_input "Database port" "3306")
+        EXT_DB_NAME=$(ask_input "Database name" "october")
+        EXT_DB_USER=$(ask_input "Database username" "october")
+        EXT_DB_PASS=$(ask_input "Database password" "")
     fi
 
-    # php_memory_limit: 25% of RAM, min 128M, max 512M
-    local php_mem=$((avail_gb * 1024 / 4))
-    [ "$php_mem" -lt 128 ] && php_mem=128
-    [ "$php_mem" -gt 512 ] && php_mem=512
+    # Redis
+    echo ""
+    local redis_choice=$(ask_choice "Redis Cache" \
+        "Bundled Redis (runs in container)" \
+        "External Redis (AWS ElastiCache, etc.)")
 
-    sed -i -e "s|^  php_memory_limit:.*|  php_memory_limit: ${php_mem}M|w $changelog" "$CONFIG_FILE"
-    if [ -s "$changelog" ]; then
-        echo "Setting php_memory_limit = ${php_mem}M"
-        rm -f "$changelog"
+    if [ "$redis_choice" = "1" ]; then
+        USE_REDIS="true"
+        EXT_REDIS_HOST=""
+    else
+        USE_REDIS="false"
+        EXT_REDIS_HOST=$(ask_input "Redis host" "")
+        EXT_REDIS_PORT=$(ask_input "Redis port" "6379")
     fi
 
-    # redis_maxmemory: 10% of RAM, min 32mb, max 256mb
-    local redis_mem=$((avail_gb * 1024 / 10))
-    [ "$redis_mem" -lt 32 ] && redis_mem=32
-    [ "$redis_mem" -gt 256 ] && redis_mem=256
-
-    sed -i -e "s|^  redis_maxmemory:.*|  redis_maxmemory: \"${redis_mem}mb\"|w $changelog" "$CONFIG_FILE"
-    if [ -s "$changelog" ]; then
-        echo "Setting redis_maxmemory = ${redis_mem}mb"
-        rm -f "$changelog"
+    # Custom October repo (optional)
+    echo ""
+    if ask_yes_no "Install from a custom Git repository?" "n"; then
+        OCTOBER_REPO=$(ask_input "Git repository URL" "")
+    else
+        OCTOBER_REPO=""
     fi
 
-    echo
+    ENVIRONMENT="production"
 }
 
-##############################################################################
-# User Configuration Prompts
-##############################################################################
+create_config_file() {
+    local site_name="$1"
+    local config_file="$CONTAINERS_DIR/${site_name}.yml"
 
-ask_user_for_config() {
-    local changelog="/tmp/changelog.$$"
-    local new_value=""
-    local config_ok="n"
-    local update_ok="y"
+    mkdir -p "$CONTAINERS_DIR"
 
-    # Read current values from config
-    local hostname=$(read_config "APP_URL" | sed 's|^https\?://||')
-    local db_password=$(read_config "db_password")
-    local db_host=$(read_config "DB_HOST")
-    local app_key=$(read_config "APP_KEY")
+    cat > "$config_file" << EOF
+# October CMS Site Configuration
+# Generated by october-setup on $(date +%Y-%m-%d)
 
-    # SSL configuration
-    local use_ssl="n"
-    local letsencrypt_email=""
+# Environment: development or production
+environment: $ENVIRONMENT
 
-    echo -e "${BOLD}=== Site Configuration ===${NC}"
-    echo
+# Site directory (where October CMS files live)
+site_path: $SITE_PATH
 
-    while [[ "$config_ok" == "n" ]]; do
-        # Hostname
-        if [ ! -z "$hostname" ]; then
-            read -p "Hostname for your October CMS site? [$hostname]: " new_value
-            if [ ! -z "$new_value" ]; then
-                hostname="$new_value"
-            fi
+# Network
+http_port: $HTTP_PORT
+EOF
+
+    if [ "$ENVIRONMENT" = "production" ]; then
+        cat >> "$config_file" << EOF
+https_port: $HTTPS_PORT
+hostname: $HOSTNAME
+
+# SSL: none, letsencrypt, or custom
+ssl_mode: $SSL_MODE
+EOF
+
+        if [ "$SSL_MODE" = "letsencrypt" ]; then
+            echo "letsencrypt_email: $LETSENCRYPT_EMAIL" >> "$config_file"
         fi
+    fi
 
-        # Check if IP address (warn but allow)
-        if [[ $hostname =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-            echo
-            warning "October CMS works best with a DNS hostname. IP addresses may cause issues with cookies/sessions."
-            warning "SSL/HTTPS requires a domain name and cannot be used with IP addresses."
-            echo
-            use_ssl="n"
+    cat >> "$config_file" << EOF
+
+# Services (set to false to use external services)
+services:
+  mariadb: $USE_MARIADB
+  redis: $USE_REDIS
+EOF
+
+    if [ "$USE_MARIADB" = "false" ]; then
+        cat >> "$config_file" << EOF
+
+# External database connection
+db_host: $EXT_DB_HOST
+db_port: ${EXT_DB_PORT:-3306}
+db_name: ${EXT_DB_NAME:-october}
+db_user: ${EXT_DB_USER:-october}
+EOF
+    fi
+
+    if [ "$USE_REDIS" = "false" ]; then
+        cat >> "$config_file" << EOF
+
+# External Redis connection
+redis_host: $EXT_REDIS_HOST
+redis_port: ${EXT_REDIS_PORT:-6379}
+EOF
+    fi
+
+    success "Created configuration: $config_file"
+}
+
+create_site_directory() {
+    local site_name="$1"
+    local expanded_path=$(expand_path "$SITE_PATH")
+
+    # Create site directory
+    if [ ! -d "$expanded_path" ]; then
+        mkdir -p "$expanded_path" || fatal "Cannot create $expanded_path"
+        success "Created site directory: $expanded_path"
+    else
+        # Check if we can write to existing directory
+        if [ ! -w "$expanded_path" ]; then
+            echo ""
+            fatal "Cannot write to $expanded_path
+
+    The directory exists but you don't have write permission.
+    This usually happens when Docker created it as root.
+
+    Fix with: sudo chown -R \$USER:\$USER $expanded_path"
+        fi
+        info "Site directory already exists: $expanded_path"
+    fi
+
+    # Create .data parent directory only - let containers create their
+    # own subdirectories (mysql, redis) with correct ownership/permissions
+    if [ "$USE_MARIADB" = "true" ] || [ "$USE_REDIS" = "true" ]; then
+        if ! mkdir -p "$expanded_path/.data" 2>/dev/null; then
+            fatal "Cannot create $expanded_path/.data - permission denied"
+        fi
+    fi
+}
+
+create_env_file() {
+    local site_name="$1"
+    local expanded_path=$(expand_path "$SITE_PATH")
+    local env_file="$expanded_path/.env"
+
+    # Generate passwords
+    local app_key=$(generate_app_key)
+    local db_password=$(generate_password 24)
+    local db_root_password=$(generate_password 24)
+
+    # Determine APP_URL
+    local app_url
+    if [ "$ENVIRONMENT" = "production" ]; then
+        if [ "$SSL_MODE" != "none" ]; then
+            app_url="https://$HOSTNAME"
         else
-            # Only offer SSL for non-localhost domains
-            if [[ "$hostname" != "localhost" ]]; then
-                echo
-                if confirm "Enable HTTPS with Let's Encrypt?" "y"; then
-                    use_ssl="y"
-                    letsencrypt_email=$(ask "Email for Let's Encrypt notifications" "admin@$hostname")
-                fi
-            fi
+            app_url="http://$HOSTNAME"
         fi
-
-        echo -e "\nDoes this look right?\n"
-        echo "Hostname: $hostname"
-        if [[ "$use_ssl" == "y" ]]; then
-            echo "App URL:  https://$hostname"
-            echo "SSL:      Let's Encrypt (email: $letsencrypt_email)"
+    else
+        if [ "$HTTP_PORT" = "80" ]; then
+            app_url="http://localhost"
         else
-            echo "App URL:  http://$hostname"
-            echo "SSL:      Disabled"
-        fi
-        echo ""
-        read -p "ENTER to continue, 'n' to try again, Ctrl+C to exit: " config_ok
-    done
-
-    # Update APP_URL (with https if SSL enabled)
-    if [[ "$use_ssl" == "y" ]]; then
-        update_config "APP_URL" "https://$hostname" || {
-            echo "APP_URL change failed."
-            update_ok="n"
-        }
-
-        # Enable SSL templates
-        info "Enabling SSL templates..."
-        enable_template "templates/web.ssl.template.yml" || echo "web.ssl.template.yml NOT ENABLED -- was it already enabled?"
-        enable_template "templates/web.letsencrypt.template.yml" || echo "web.letsencrypt.template.yml NOT ENABLED -- was it already enabled?"
-
-        # Enable 443 port
-        enable_port "443:443" || echo "Port 443 NOT ENABLED -- was it already enabled?"
-
-        # Enable and set LETSENCRYPT_EMAIL
-        enable_env "LETSENCRYPT_EMAIL"
-        update_config "LETSENCRYPT_EMAIL" "$letsencrypt_email" || {
-            echo "LETSENCRYPT_EMAIL change failed."
-            update_ok="n"
-        }
-    else
-        update_config "APP_URL" "http://$hostname" || {
-            echo "APP_URL change failed."
-            update_ok="n"
-        }
-    fi
-
-    # Generate and update passwords only for standalone configs (internal DB)
-    if [[ "$db_host" == "127.0.0.1" ]] && [[ "$db_password" == *"CHANGE_THIS"* || "$db_password" == "development" ]]; then
-        echo
-        info "Generating secure database passwords..."
-
-        local new_db_password=$(random_string 16)
-        local new_root_password=$(random_string 20)
-
-        update_config "db_password" "$new_db_password" || {
-            echo "db_password change failed."
-            update_ok="n"
-        }
-
-        update_config "db_root_password" "$new_root_password" || {
-            echo "db_root_password change failed."
-            update_ok="n"
-        }
-
-        update_config "DB_PASSWORD" "$new_db_password" || {
-            echo "DB_PASSWORD change failed."
-            update_ok="n"
-        }
-    fi
-
-    # Generate APP_KEY if it's a placeholder
-    if [[ "$app_key" == *"CHANGE_THIS"* || "$app_key" == *"GENERATE"* ]]; then
-        info "Generating secure APP_KEY..."
-        local new_app_key=$(generate_app_key)
-
-        update_config "APP_KEY" "$new_app_key" || {
-            echo "APP_KEY change failed."
-            update_ok="n"
-        }
-    fi
-
-    if [ "$update_ok" == "y" ]; then
-        echo -e "\nConfiguration file at $CONFIG_FILE updated successfully!\n"
-    else
-        echo -e "\nUnfortunately, there was an error updating $CONFIG_FILE\n"
-        echo -e "You may need to edit the file manually."
-        exit 1
-    fi
-}
-
-##############################################################################
-# Validation
-##############################################################################
-
-validate_config() {
-    local valid_config="y"
-
-    # Check that placeholder values have been changed
-    local app_key=$(read_config "APP_KEY")
-    if [[ "$app_key" == *"CHANGE_THIS"* ]] || [[ "$app_key" == *"GENERATE"* ]]; then
-        echo "APP_KEY still has placeholder value"
-        valid_config="n"
-    fi
-
-    local app_url=$(read_config "APP_URL")
-    if [[ "$app_url" == *"example.com"* ]]; then
-        echo "APP_URL still has example.com placeholder"
-        valid_config="n"
-    fi
-
-    # For standalone configs, check db_password
-    local db_host=$(read_config "DB_HOST")
-    if [[ "$db_host" == "127.0.0.1" ]]; then
-        local db_password=$(read_config "db_password")
-        if [[ "$db_password" == *"CHANGE_THIS"* ]]; then
-            echo "db_password still has placeholder value"
-            valid_config="n"
+            app_url="http://localhost:$HTTP_PORT"
         fi
     fi
 
-    if [ "$valid_config" != "y" ]; then
-        echo -e "\nSorry, these $CONFIG_FILE settings aren't valid -- can't continue!"
-        echo "Please edit $CONFIG_FILE manually or run this setup again."
-        exit 1
+    # Determine environment settings
+    local app_env app_debug
+    if [ "$ENVIRONMENT" = "production" ]; then
+        app_env="production"
+        app_debug="false"
+    else
+        app_env="local"
+        app_debug="true"
     fi
+
+    cat > "$env_file" << EOF
+# October CMS Environment Configuration
+# Generated by october-setup on $(date +%Y-%m-%d)
+
+APP_KEY=base64:$app_key
+APP_URL=$app_url
+APP_ENV=$app_env
+APP_DEBUG=$app_debug
+
+# Database Configuration
+EOF
+
+    if [ "$USE_MARIADB" = "true" ]; then
+        cat >> "$env_file" << EOF
+DB_CONNECTION=mysql
+DB_HOST=mariadb
+DB_PORT=3306
+DB_DATABASE=october
+DB_USERNAME=october
+DB_PASSWORD=$db_password
+
+# MariaDB container settings
+MYSQL_ROOT_PASSWORD=$db_root_password
+MYSQL_DATABASE=october
+MYSQL_USER=october
+MYSQL_PASSWORD=$db_password
+EOF
+    else
+        cat >> "$env_file" << EOF
+DB_CONNECTION=mysql
+DB_HOST=$EXT_DB_HOST
+DB_PORT=${EXT_DB_PORT:-3306}
+DB_DATABASE=${EXT_DB_NAME:-october}
+DB_USERNAME=${EXT_DB_USER:-october}
+DB_PASSWORD=${EXT_DB_PASS:-}
+EOF
+    fi
+
+    cat >> "$env_file" << EOF
+
+# Redis Configuration
+EOF
+
+    if [ "$USE_REDIS" = "true" ]; then
+        cat >> "$env_file" << EOF
+REDIS_HOST=redis
+REDIS_PORT=6379
+CACHE_DRIVER=redis
+SESSION_DRIVER=redis
+EOF
+    else
+        cat >> "$env_file" << EOF
+REDIS_HOST=$EXT_REDIS_HOST
+REDIS_PORT=${EXT_REDIS_PORT:-6379}
+CACHE_DRIVER=redis
+SESSION_DRIVER=redis
+EOF
+    fi
+
+    # Add October repo if specified
+    if [ -n "$OCTOBER_REPO" ]; then
+        cat >> "$env_file" << EOF
+
+# Custom October CMS Repository
+OCTOBER_REPO=$OCTOBER_REPO
+EOF
+    fi
+
+    # Add SSL configuration for production
+    if [ "$ENVIRONMENT" = "production" ]; then
+        cat >> "$env_file" << EOF
+
+# SSL Configuration
+SSL_MODE=$SSL_MODE
+APP_HOSTNAME=$HOSTNAME
+EOF
+
+        if [ "$SSL_MODE" = "letsencrypt" ]; then
+            echo "LETSENCRYPT_EMAIL=$LETSENCRYPT_EMAIL" >> "$env_file"
+        fi
+    fi
+
+    # Set permissions (readable by all, writable by owner)
+    # Docker-compose needs to read this file
+    chmod 644 "$env_file"
+
+    success "Created environment file: $env_file"
 }
 
 ##############################################################################
 # Main
 ##############################################################################
 
-show_welcome() {
-    echo
-    echo -e "${CYAN}╔══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║                                                          ║${NC}"
-    echo -e "${CYAN}║            October CMS Docker Setup Wizard               ║${NC}"
-    echo -e "${CYAN}║                                                          ║${NC}"
-    echo -e "${CYAN}╚══════════════════════════════════════════════════════════╝${NC}"
-    echo
-    info "This wizard will help you configure October CMS for Docker."
-    info "Press Ctrl+C at any time to cancel."
-    echo
-}
-
-show_help() {
-    cat << EOF
-October Docker Setup Wizard
-
-Usage: ./october-setup [options] [config_name]
-       ./october-setup --help
-
-Arguments:
-  config_name   Name for the configuration (will be prompted if not provided)
-                Creates containers/<config_name>.yml
-
-Options:
-  --help, -h      Show this help message
-  --skip-rebuild  Configure only, don't offer to bootstrap
-
-This interactive wizard will guide you through configuring October CMS
-for Docker deployment. It will:
-
-  1. Check system prerequisites (Docker, disk space, memory)
-  2. Let you select a sample configuration to use
-  3. Copy the sample to containers/<config_name>.yml
-  4. Auto-tune resources based on your system
-  5. Configure your site hostname and SSL/HTTPS
-  6. Generate secure passwords and APP_KEY
-  7. Optionally bootstrap the container
-
-Available sample configurations:
-  standalone.yml      All-in-one with MySQL + Redis + Web (recommended)
-  standalone-dev.yml  Development environment with Xdebug
-  web-only.yml        Web server only (external database)
-  data.yml            Data services only (MySQL + Redis)
-
-Examples:
-  ./october-setup                    # Interactive setup
-  ./october-setup mysite             # Use 'mysite' as config name
-  ./october-setup --skip-rebuild     # Configure without bootstrapping
-
-After setup, you can:
-  - Start the container:  ./launcher start <config>
-  - Enter the container:  ./launcher enter <config>
-  - View logs:            ./launcher logs <config>
-  - Rebuild:              ./launcher rebuild <config>
-
-Requirements:
-  - Docker (that's it!)
-
-EOF
-}
-
 main() {
     # Parse arguments
-    SKIP_REBUILD=""
-    CUSTOM_NAME=""
-
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --help|-h)
-                show_help
-                exit 0
-                ;;
-            --skip-rebuild)
-                SKIP_REBUILD="1"
-                ;;
-            -*)
-                error "Unknown option: $1"
-                echo "Run './october-setup --help' for usage."
-                exit 1
-                ;;
-            *)
-                # First non-option argument is the config name
-                if [[ -z "$CUSTOM_NAME" ]]; then
-                    CUSTOM_NAME="$1"
-                fi
-                ;;
-        esac
-        shift
-    done
-
-    show_welcome
-
-    # Check prerequisites
-    if ! check_prerequisites; then
-        exit 1
-    fi
-
-    # Ensure containers directory exists
-    mkdir -p "$CONTAINERS_DIR"
-
-    # Let user select sample configuration
-    select_sample
-
-    # If custom name was provided via command line, use it
-    if [[ -n "$CUSTOM_NAME" ]]; then
-        APP_NAME="$CUSTOM_NAME"
-        CONFIG_FILE="$CONTAINERS_DIR/$APP_NAME.yml"
-    fi
-
-    # Check for existing config
-    BACKUP_FILE=""
-    if [ -f "$CONFIG_FILE" ]; then
-        echo "The configuration file $CONFIG_FILE already exists!"
-        echo
-        if ! confirm "Do you want to reconfigure it?" "n"; then
-            info "Setup cancelled. Existing configuration preserved."
-            exit 0
-        fi
-        echo ". . . reconfiguring . . ."
-        echo
-        DATE=$(date +"%Y-%m-%d-%H%M%S")
-        BACKUP="$APP_NAME.yml.$DATE.bak"
-        BACKUP_FILE="$CONTAINERS_DIR/$BACKUP"
-        echo "Saving old file as $BACKUP"
-        cp "$CONFIG_FILE" "$BACKUP_FILE"
-        echo
-    fi
-
-    # Copy sample file to containers directory (fresh copy for new or reconfigure)
-    info "Creating configuration from $SELECTED_SAMPLE..."
-    cp "$SAMPLE_FILE" "$CONFIG_FILE"
-    chmod 600 "$CONFIG_FILE"
-
-    # If reconfiguring, restore credentials from backup to avoid breaking existing database
-    if [ -n "$BACKUP_FILE" ]; then
-        info "Preserving credentials from previous configuration..."
-
-        # Read credentials from backup
-        local old_db_password=$(grep -E "^  db_password:" "$BACKUP_FILE" 2>/dev/null | sed 's/^[^:]*:[[:space:]]*//' | sed 's/^"\(.*\)"$/\1/' | tr -d '\r')
-        local old_db_root_password=$(grep -E "^  db_root_password:" "$BACKUP_FILE" 2>/dev/null | sed 's/^[^:]*:[[:space:]]*//' | sed 's/^"\(.*\)"$/\1/' | tr -d '\r')
-        local old_app_key=$(grep -E "^  APP_KEY:" "$BACKUP_FILE" 2>/dev/null | sed 's/^[^:]*:[[:space:]]*//' | sed 's/^"\(.*\)"$/\1/' | tr -d '\r')
-
-        # Restore db_password if it was a real password (not a placeholder)
-        if [[ -n "$old_db_password" ]] && [[ "$old_db_password" != *"CHANGE_THIS"* ]]; then
-            update_config "db_password" "$old_db_password" && echo "  Restored db_password"
-            update_config "DB_PASSWORD" "$old_db_password" && echo "  Restored DB_PASSWORD"
-        fi
-
-        # Restore db_root_password if it was a real password
-        if [[ -n "$old_db_root_password" ]] && [[ "$old_db_root_password" != *"CHANGE_THIS"* ]]; then
-            update_config "db_root_password" "$old_db_root_password" && echo "  Restored db_root_password"
-        fi
-
-        # Restore APP_KEY if it was a real key
-        if [[ -n "$old_app_key" ]] && [[ "$old_app_key" != *"CHANGE_THIS"* ]] && [[ "$old_app_key" != *"GENERATE"* ]]; then
-            update_config "APP_KEY" "$old_app_key" && echo "  Restored APP_KEY"
-        fi
-
-        echo
-    fi
-
-    # Scale resources based on system
-    info "Auto-tuning resources based on your system..."
-    scale_resources
-
-    # Ask user for configuration
-    ask_user_for_config
-
-    # Validate configuration
-    validate_config
-
-    # Offer to bootstrap (unless --skip-rebuild)
-    if [ "$SKIP_REBUILD" ]; then
-        echo
-        success "Configuration saved to: $CONFIG_FILE"
-        info "Run './launcher bootstrap $APP_NAME' when ready to start."
+    if [ $# -lt 1 ] || [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+        show_help
         exit 0
     fi
 
-    echo
-    if confirm "Would you like to bootstrap the container now?" "y"; then
-        echo
-        info "Bootstrapping container..."
-        sleep 2
-        "$SCRIPT_DIR/launcher" bootstrap "$APP_NAME"
-    else
-        echo
-        success "Configuration saved to: $CONFIG_FILE"
-        info "Run './launcher bootstrap $APP_NAME' when ready to start."
+    local site_name="$1"
+
+    # Validate site name
+    if [[ ! "$site_name" =~ ^[a-z][a-z0-9_-]*$ ]]; then
+        fatal "Site name must start with a letter and contain only lowercase letters, numbers, hyphens, and underscores"
     fi
+
+    # Check if config already exists
+    local config_file="$CONTAINERS_DIR/${site_name}.yml"
+    local recreate_site_only=false
+
+    if [ -f "$config_file" ]; then
+        # Load existing config to check site directory
+        load_existing_config "$config_file"
+        local expanded_path=$(expand_path "$SITE_PATH")
+
+        if [ ! -d "$expanded_path" ] || [ ! -f "$expanded_path/.env" ]; then
+            # Config exists but site directory or .env is missing
+            warning "Configuration exists but site directory is missing or incomplete"
+            info "Config: $config_file"
+            info "Expected site path: $expanded_path"
+            echo ""
+
+            if ask_yes_no "Recreate site directory using existing configuration?" "y"; then
+                recreate_site_only=true
+            else
+                warning "Configuration already exists: $config_file"
+                if ! ask_yes_no "Overwrite existing configuration?" "n"; then
+                    info "Setup cancelled"
+                    exit 0
+                fi
+            fi
+        else
+            # Both config and site exist
+            warning "Configuration already exists: $config_file"
+            if ! ask_yes_no "Overwrite existing configuration?" "n"; then
+                info "Setup cancelled"
+                exit 0
+            fi
+        fi
+    fi
+
+    if [ "$recreate_site_only" = "true" ]; then
+        # Just recreate site directory and .env using existing config
+        echo ""
+        printf "${BOLD}Recreating Site Directory${NC}\n"
+        echo "-------------------------"
+        echo ""
+
+        create_site_directory "$site_name"
+        create_env_file "$site_name"
+    else
+        # Full setup flow
+        # Welcome message
+        echo ""
+        printf "${BOLD}October CMS Docker Setup${NC}\n"
+        echo "========================="
+        echo ""
+        echo "Setting up site: $site_name"
+        echo ""
+
+        # Ask environment type
+        local env_choice=$(ask_choice "What type of environment is this?" \
+            "Development (local machine, debugging enabled)" \
+            "Production (server, optimized for performance)")
+
+        case "$env_choice" in
+            1)
+                setup_development "$site_name"
+                ;;
+            2)
+                setup_production "$site_name"
+                ;;
+        esac
+
+        # Create files
+        echo ""
+        printf "${BOLD}Creating Configuration${NC}\n"
+        echo "----------------------"
+        echo ""
+
+        create_config_file "$site_name"
+        create_site_directory "$site_name"
+        create_env_file "$site_name"
+    fi
+
+    # Summary
+    local expanded_path=$(expand_path "$SITE_PATH")
+
+    echo ""
+    echo "============================================================"
+    printf "${GREEN}${BOLD}Setup Complete!${NC}\n"
+    echo "============================================================"
+    echo ""
+    echo "Configuration: $config_file"
+    echo "Site directory: $expanded_path"
+    echo "Environment: $ENVIRONMENT"
+    echo ""
+    echo "Next steps:"
+    echo ""
+    echo "  1. Start your site:"
+    echo "     ./launcher start $site_name"
+    echo ""
+    echo "  2. Access your site at:"
+    if [ "$ENVIRONMENT" = "production" ] && [ "$SSL_MODE" != "none" ]; then
+        echo "     https://$HOSTNAME"
+    elif [ "$HTTP_PORT" = "80" ]; then
+        echo "     http://localhost"
+    else
+        echo "     http://localhost:$HTTP_PORT"
+    fi
+    echo ""
+
+    if [ "$ENVIRONMENT" = "development" ]; then
+        echo "  3. For VS Code development:"
+        echo "     - Open the site directory in VS Code"
+        echo "     - Use 'Reopen in Container' for full IDE integration"
+        echo ""
+    fi
+
+    echo "Other commands:"
+    echo "  ./launcher stop $site_name      Stop the site"
+    echo "  ./launcher logs $site_name      View logs"
+    echo "  ./launcher enter $site_name     Shell access"
+    echo "  ./launcher status               Show all sites"
+    echo ""
 }
 
 main "$@"

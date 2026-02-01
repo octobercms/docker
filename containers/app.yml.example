@@ -1,0 +1,34 @@
+# October CMS Site Configuration Example
+# Copy this file and rename to <sitename>.yml (e.g., blog.yml)
+# Then run: ./launcher start <sitename>
+
+# Environment: development or production
+environment: development
+
+# Site directory (where October CMS files live)
+# Default: ~/october-sites/<sitename>
+site_path: ~/october-sites/app
+
+# Network ports
+http_port: 80
+# https_port: 443  # Production only
+
+# Production settings (uncomment for production)
+# hostname: app.example.com
+# ssl_mode: letsencrypt
+# letsencrypt_email: admin@example.com
+
+# Services (set to false to use external services)
+services:
+  mariadb: true
+  redis: true
+
+# External database (when services.mariadb is false)
+# db_host: your-rds.amazonaws.com
+# db_port: 3306
+# db_name: october
+# db_user: october
+
+# External Redis (when services.redis is false)
+# redis_host: your-elasticache.amazonaws.com
+# redis_port: 6379
