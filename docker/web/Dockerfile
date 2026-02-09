@@ -7,6 +7,7 @@ ARG ENVIRONMENT=development
 RUN apt-get update && apt-get install -y \
     apache2 \
     supervisor \
+    cron \
     git \
     unzip \
     curl \
@@ -20,9 +21,9 @@ RUN apt-get update && apt-get install -y \
     libonig-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install certbot and cron for production only
+# Install certbot for production only (Let's Encrypt SSL)
 RUN if [ "$ENVIRONMENT" = "production" ]; then \
-    apt-get update && apt-get install -y certbot python3-certbot-apache cron \
+    apt-get update && apt-get install -y certbot python3-certbot-apache \
     && rm -rf /var/lib/apt/lists/*; \
 fi
 
