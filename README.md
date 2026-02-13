@@ -18,36 +18,6 @@ cd october-docker
 
 Your site will be available at http://localhost
 
-## Installing October CMS v3
-
-To install October CMS v3 from the official repository:
-
-```bash
-# Set up a new site
-./october-setup myapp
-```
-
-During setup, select **"Yes"** for custom Git repository and enter:
-- **Repository URL**: `https://github.com/octobercms/october.git`
-- **Branch**: `3.x`
-
-Then start the site:
-
-```bash
-./launcher start myapp
-```
-
-On first start, the container will clone the repository, check out the `3.x` branch, and run `composer install`. Once the containers are running, open a shell to complete the installation:
-
-```bash
-./launcher enter myapp
-php artisan october:install
-php artisan october:migrate
-php artisan october:mirror
-```
-
-This will run the interactive installer where you can enter your license key and configure the application. You only need to do this once.
-
 ## Requirements
 
 - Docker Engine 20.10+
@@ -176,6 +146,36 @@ To deploy from your own October CMS repository instead of a fresh install:
 4. The entrypoint will clone your repo and run `composer install`
 
 Or manually set `OCTOBER_REPO` and `OCTOBER_BRANCH` in your site's `.env` file before first start.
+
+## Installing October CMS v3
+
+To install October CMS v3 from the official repository:
+
+```bash
+# Set up a new site
+./october-setup myapp
+```
+
+During setup, select **"Yes"** for custom Git repository and enter:
+- **Repository URL**: `https://github.com/octobercms/october.git`
+- **Branch**: `3.x`
+
+Then start the site:
+
+```bash
+./launcher start myapp
+```
+
+On first start, the container will clone the repository, check out the `3.x` branch, and run `composer install`. Once the containers are running, open a shell to complete the installation:
+
+```bash
+./launcher enter myapp
+php artisan october:install
+php artisan october:migrate
+php artisan october:mirror
+```
+
+This will run the interactive installer where you can enter your license key and configure the application. You only need to do this once.
 
 ## Configuration Files
 
