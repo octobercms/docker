@@ -78,6 +78,10 @@ Commands:
   code <site>       Open VS Code attached to the web container
   status            Show status of all sites
 
+Windows (WSL only):
+  mount             Share sites via Samba and mount as a Windows drive
+  unmount           Disconnect the Windows drive and stop Samba
+
 Examples:
   ./launcher start app
   ./launcher logs app
@@ -371,6 +375,116 @@ cmd_status() {
 }
 
 ##############################################################################
+# Windows Drive Mount (WSL only)
+##############################################################################
+
+SAMBA_CONTAINER_NAME="october_samba"
+SITES_BASE_DIR="$HOME/october-sites"
+
+is_wsl() {
+    grep -qi microsoft /proc/version 2>/dev/null
+}
+
+get_wsl_ip() {
+    hostname -I | awk '{print $1}'
+}
+
+cmd_mount() {
+    # Check we're in WSL
+    if ! is_wsl; then
+        fatal "The mount command is only available in WSL (Windows Subsystem for Linux)."
+    fi
+
+    # Check if already running
+    if docker ps --format '{{.Names}}' | grep -q "^${SAMBA_CONTAINER_NAME}$"; then
+        warning "Samba container is already running."
+        local wsl_ip=$(get_wsl_ip)
+        echo ""
+        info "To mount, run this in PowerShell on Windows:"
+        echo "  net use <DRIVE>: \\\\${wsl_ip}\\sites"
+        exit 0
+    fi
+
+    # Ensure sites directory exists
+    if [ ! -d "$SITES_BASE_DIR" ]; then
+        fatal "Sites directory not found: $SITES_BASE_DIR"
+    fi
+
+    # Ask for drive letter
+    local drive_letter=""
+    while true; do
+        read -p "Drive letter to mount [Z]: " drive_letter
+        drive_letter="${drive_letter:-Z}"
+        drive_letter=$(echo "$drive_letter" | tr '[:lower:]' '[:upper:]')
+
+        # Validate single letter
+        if [[ "$drive_letter" =~ ^[A-Z]$ ]]; then
+            break
+        else
+            error "Please enter a single letter (A-Z)."
+        fi
+    done
+
+    info "Starting Samba container..."
+
+    docker run -d \
+        --name "$SAMBA_CONTAINER_NAME" \
+        --restart unless-stopped \
+        -p 445:445 \
+        -v "$SITES_BASE_DIR:/share" \
+        dperson/samba -p \
+        -s "sites;/share;yes;no;yes" \
+        -g "map to guest = bad user" \
+        > /dev/null 2>&1
+
+    if [ $? -ne 0 ]; then
+        fatal "Failed to start Samba container. Is port 445 in use?"
+    fi
+
+    # Wait for Samba to start
+    sleep 2
+
+    local wsl_ip=$(get_wsl_ip)
+
+    info "Mounting drive ${drive_letter}: via PowerShell..."
+
+    # Run net use from Windows via PowerShell
+    powershell.exe -Command "net use ${drive_letter}: \\\\${wsl_ip}\\sites" 2>/dev/null
+
+    if [ $? -eq 0 ]; then
+        success "Mounted ${drive_letter}:\\ -> ${SITES_BASE_DIR}"
+        echo ""
+        echo "  Your sites are available at ${drive_letter}:\\"
+        echo "  Use Tortoise Git and other Windows tools normally."
+        echo ""
+        echo "  Run './launcher unmount' to disconnect."
+    else
+        warning "Auto-mount failed. You can mount manually in PowerShell:"
+        echo "  net use ${drive_letter}: \\\\${wsl_ip}\\sites"
+    fi
+}
+
+cmd_unmount() {
+    if ! is_wsl; then
+        fatal "The unmount command is only available in WSL (Windows Subsystem for Linux)."
+    fi
+
+    # Disconnect all net use connections to the Samba share
+    local wsl_ip=$(get_wsl_ip)
+    info "Disconnecting Windows drive..."
+    powershell.exe -Command "net use /delete \\\\${wsl_ip}\\sites /yes" 2>/dev/null || true
+
+    # Stop and remove the Samba container
+    if docker ps -a --format '{{.Names}}' | grep -q "^${SAMBA_CONTAINER_NAME}$"; then
+        info "Stopping Samba container..."
+        docker rm -f "$SAMBA_CONTAINER_NAME" > /dev/null 2>&1
+        success "Samba container stopped and drive disconnected."
+    else
+        info "Samba container is not running."
+    fi
+}
+
+##############################################################################
 # Main
 ##############################################################################
 
@@ -392,6 +506,12 @@ main() {
             ;;
         status)
             cmd_status
+            ;;
+        mount)
+            cmd_mount
+            ;;
+        unmount)
+            cmd_unmount
             ;;
         help|--help|-h)
             show_help
