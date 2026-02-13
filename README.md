@@ -22,6 +22,7 @@ Your site will be available at http://localhost
 
 - Docker Engine 20.10+
 - Docker Compose v2
+- WSL2 (Windows) or native Linux/macOS
 
 ## Architecture
 
@@ -58,8 +59,11 @@ october-docker/                    # This repository (clone once)
 | `./launcher rebuild <name>` | Rebuild and restart (after Dockerfile changes) |
 | `./launcher enter <name>` | Open shell in web container |
 | `./launcher logs <name>` | View container logs |
+| `./launcher code <name>` | Open VS Code attached to the web container |
 | `./launcher status` | Show all sites and their status |
 | `./launcher destroy <name>` | Remove containers (preserves data) |
+| `./launcher mount` | Share sites via Samba and mount as a Windows drive (WSL only) |
+| `./launcher unmount` | Disconnect the Windows drive and stop Samba (WSL only) |
 
 ## Setup Options
 
@@ -96,19 +100,40 @@ Each site has isolated containers and data directories.
 
 ## VS Code Development
 
-For the best development experience, use VS Code with Dev Containers:
+Open VS Code attached to a running site container:
 
-1. Start your site: `./launcher start myapp`
-2. Open VS Code
-3. Install "Dev Containers" extension
-4. Open the site folder (`~/october-sites/myapp`)
-5. Click "Reopen in Container"
+```bash
+./launcher code myapp
+```
 
-This gives you:
+This opens VS Code with the Dev Containers extension connected directly to the web container, giving you:
 - Full IDE with IntelliSense
 - Integrated debugging with Xdebug
 - Terminal access inside the container
-- Fast file access (no bind mount penalty)
+
+## Windows Development (WSL)
+
+On Windows, site files live inside WSL2 for optimal Docker volume performance. To access them with Windows tools like Tortoise Git, the launcher can mount the sites directory as a Windows drive via Samba:
+
+```bash
+./launcher mount
+```
+
+This will:
+1. Install Samba in WSL if needed (one-time)
+2. Configure a share for `~/october-sites`
+3. Ask for a drive letter (default: Z)
+4. Mount the drive automatically
+
+Your sites will be available at `Z:\myapp`, `Z:\blog`, etc. Use Tortoise Git, Explorer, and other Windows tools normally.
+
+To disconnect:
+
+```bash
+./launcher unmount
+```
+
+The WSL IP changes on reboot, so you'll need to run `./launcher mount` each time you restart your machine.
 
 ## Custom Git Repository
 
@@ -173,6 +198,24 @@ The container runs as `www-data`. If you have permission issues with mounted fil
 ```bash
 ./launcher enter myapp
 chown -R www-data:www-data /var/www/html/storage
+```
+
+### Windows drive is read-only or shows permission errors
+
+If accessing files via `\\wsl.localhost\` or a mapped drive shows permission errors, use the Samba mount instead:
+
+```bash
+./launcher mount
+```
+
+Samba bypasses Linux file permissions, so files are always writable regardless of ownership.
+
+### Phantom drives after unmount
+
+If a mapped drive letter persists in Explorer after unmounting, restart Explorer:
+
+```powershell
+Stop-Process -Name explorer -Force; Start-Process explorer
 ```
 
 ### Reset everything
