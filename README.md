@@ -42,6 +42,8 @@ On first start, the container will clone the repository, check out the `3.x` bra
 ```bash
 ./launcher enter myapp
 php artisan october:install
+php artisan october:migrate
+php artisan october:mirror
 ```
 
 This will run the interactive installer where you can enter your license key and configure the application. You only need to do this once.
