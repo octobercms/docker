@@ -83,7 +83,12 @@ if [ ! -f /var/www/html/artisan ]; then
         cp /var/www/html/.env /tmp/env-backup 2>/dev/null || true
 
         # Clone to temp directory (site dir may have .env and .data)
-        git clone "$OCTOBER_REPO" /tmp/october-install
+        if [ -n "$OCTOBER_BRANCH" ]; then
+            echo "Using branch: $OCTOBER_BRANCH"
+            git clone -b "$OCTOBER_BRANCH" "$OCTOBER_REPO" /tmp/october-install
+        else
+            git clone "$OCTOBER_REPO" /tmp/october-install
+        fi
 
         # Remove repo's .env if present (we have our own)
         rm -f /tmp/october-install/.env 2>/dev/null || true
@@ -178,7 +183,7 @@ done
 
 if [ $tries -lt $max_tries ]; then
     echo "Running migrations..."
-    php artisan october:migrate --force
+    php artisan october:migrate
 
     # Create/update public directory mirror
     echo "Updating public directory..."

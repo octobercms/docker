@@ -73,6 +73,7 @@ Commands:
   restart <site>    Restart the site containers
   rebuild <site>    Rebuild and restart containers (after Dockerfile changes)
   destroy <site>    Stop and remove containers (preserves data)
+  wipe <site>       Completely remove a site (containers, files, config)
   enter <site>      Open a shell in the web container
   logs <site>       View container logs (follow mode)
   code <site>       Open VS Code attached to the web container
@@ -308,6 +309,41 @@ cmd_destroy() {
     success "Containers removed. Data preserved in $SITE_PATH"
 }
 
+cmd_wipe() {
+    local site_name="$1"
+    load_config "$site_name"
+
+    local expanded_path="${SITE_PATH/#\~/$HOME}"
+    local config_file="$CONTAINERS_DIR/${site_name}.yml"
+
+    echo ""
+    error "This will permanently delete everything for $site_name:"
+    echo "  - Docker containers and volumes"
+    echo "  - Site files: $expanded_path"
+    echo "  - Configuration: $config_file"
+    echo ""
+    read -p "Type the site name to confirm: " confirm
+    if [ "$confirm" != "$site_name" ]; then
+        info "Cancelled."
+        exit 0
+    fi
+
+    info "Destroying containers..."
+    $(compose_cmd) down -v --remove-orphans 2>/dev/null || true
+
+    if [ -d "$expanded_path" ]; then
+        info "Removing site files: $expanded_path"
+        rm -rf "$expanded_path"
+    fi
+
+    if [ -f "$config_file" ]; then
+        info "Removing configuration: $config_file"
+        rm -f "$config_file"
+    fi
+
+    success "Site $site_name has been completely removed."
+}
+
 cmd_enter() {
     local site_name="$1"
     load_config "$site_name"
@@ -535,7 +571,7 @@ main() {
     local site_name="$2"
 
     case "$command" in
-        start|stop|restart|rebuild|destroy|enter|logs|code)
+        start|stop|restart|rebuild|destroy|wipe|enter|logs|code)
             if [ -z "$site_name" ]; then
                 fatal "Site name required. Usage: ./launcher $command <site_name>"
             fi

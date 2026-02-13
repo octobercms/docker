@@ -206,8 +206,10 @@ setup_development() {
     echo ""
     if ask_yes_no "Install from a custom Git repository?" "n"; then
         OCTOBER_REPO=$(ask_input "Git repository URL" "")
+        OCTOBER_BRANCH=$(ask_input "Branch (leave empty for default)" "")
     else
         OCTOBER_REPO=""
+        OCTOBER_BRANCH=""
     fi
 
     # Development settings (fixed)
@@ -305,8 +307,10 @@ setup_production() {
     echo ""
     if ask_yes_no "Install from a custom Git repository?" "n"; then
         OCTOBER_REPO=$(ask_input "Git repository URL" "")
+        OCTOBER_BRANCH=$(ask_input "Branch (leave empty for default)" "")
     else
         OCTOBER_REPO=""
+        OCTOBER_BRANCH=""
     fi
 
     ENVIRONMENT="production"
@@ -510,6 +514,9 @@ EOF
 # Custom October CMS Repository
 OCTOBER_REPO=$OCTOBER_REPO
 EOF
+        if [ -n "$OCTOBER_BRANCH" ]; then
+            echo "OCTOBER_BRANCH=$OCTOBER_BRANCH" >> "$env_file"
+        fi
     fi
 
     # Add SSL configuration for production

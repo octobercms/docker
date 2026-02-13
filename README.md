@@ -18,6 +18,34 @@ cd october-docker/october
 
 Your site will be available at http://localhost
 
+## Installing October CMS v3
+
+To install October CMS v3 from the official repository:
+
+```bash
+# Set up a new site
+./october-setup myapp
+```
+
+During setup, select **"Yes"** for custom Git repository and enter:
+- **Repository URL**: `https://github.com/octobercms/october.git`
+- **Branch**: `3.x`
+
+Then start the site:
+
+```bash
+./launcher start myapp
+```
+
+On first start, the container will clone the repository, check out the `3.x` branch, and run `composer install`. Once the containers are running, open a shell to complete the installation:
+
+```bash
+./launcher enter myapp
+php artisan october:install
+```
+
+This will run the interactive installer where you can enter your license key and configure the application. You only need to do this once.
+
 ## Requirements
 
 - Docker Engine 20.10+
@@ -62,6 +90,7 @@ october-docker/                    # This repository (clone once)
 | `./launcher code <name>` | Open VS Code attached to the web container |
 | `./launcher status` | Show all sites and their status |
 | `./launcher destroy <name>` | Remove containers (preserves data) |
+| `./launcher wipe <name>` | Completely remove a site (containers, files, config) |
 | `./launcher mount` | Share sites via Samba and mount as a Windows drive (WSL only) |
 | `./launcher unmount` | Disconnect the Windows drive and stop Samba (WSL only) |
 
@@ -141,9 +170,10 @@ To deploy from your own October CMS repository instead of a fresh install:
 
 1. During setup, select "Yes" for custom Git repository
 2. Enter your repository URL
-3. The entrypoint will clone your repo and run `composer install`
+3. Optionally specify a branch (leave empty for the default branch)
+4. The entrypoint will clone your repo and run `composer install`
 
-Or manually set `OCTOBER_REPO` in your site's `.env` file before first start.
+Or manually set `OCTOBER_REPO` and `OCTOBER_BRANCH` in your site's `.env` file before first start.
 
 ## Configuration Files
 
