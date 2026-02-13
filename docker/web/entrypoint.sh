@@ -183,12 +183,16 @@ done
 
 if [ $tries -lt $max_tries ]; then
     echo "Running migrations..."
-    php artisan october:migrate
+    if ! php artisan october:migrate 2>&1; then
+        if ! php artisan october:up 2>&1; then
+            echo "Migrations skipped. Run 'php artisan october:install' manually."
+        fi
+    fi
 
     # Create/update public directory mirror
     echo "Updating public directory..."
     mkdir -p /var/www/html/public
-    php artisan october:mirror public --relative
+    php artisan october:mirror public --relative 2>/dev/null || true
 fi
 
 # Ensure permissions are correct on every start
