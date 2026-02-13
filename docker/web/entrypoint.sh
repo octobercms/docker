@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Allow git operations in the mounted volume (owned by different UIDs)
+git config --global --add safe.directory /var/www/html
+
 # Enable or disable Xdebug based on environment
 if [ "$APP_ENV" = "production" ] || [ "$XDEBUG_MODE" = "off" ]; then
     # Disable Xdebug in production
