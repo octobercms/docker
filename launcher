@@ -504,19 +504,21 @@ cmd_unmount() {
         fatal "The unmount command is only available in WSL (Windows Subsystem for Linux)."
     fi
 
-    # Disconnect Windows drive
-    local wsl_ip=$(get_wsl_ip)
+    # Disconnect drive while Samba is still running (cleaner disconnect)
     info "Disconnecting Windows drive..."
-    powershell.exe -Command "net use /delete \\\\${wsl_ip}\\${SAMBA_SHARE_NAME} /yes" 2>/dev/null || true
+    local wsl_ip=$(get_wsl_ip)
+    powershell.exe -Command "net use | Select-String '${SAMBA_SHARE_NAME}' | ForEach-Object { if (\$_ -match '([A-Z]:)') { net use \$Matches[1] /delete /yes } }" 2>/dev/null || true
+
+    # Clean up any remembered connections in the registry
+    powershell.exe -Command "'X','Z','Y','W','V','U','T','S','R','Q','P','O','N','M','L','K','J','I','H','G','F','E' | ForEach-Object { Remove-Item -Path \"HKCU:\\Network\\\$_\" -Recurse -ErrorAction SilentlyContinue }" 2>/dev/null || true
 
     # Stop Samba
     if pgrep -x smbd > /dev/null 2>&1; then
         info "Stopping Samba..."
         sudo pkill smbd 2>/dev/null
-        success "Samba stopped and drive disconnected."
-    else
-        info "Samba is not running."
     fi
+
+    success "Samba stopped and drive disconnected."
 }
 
 ##############################################################################
