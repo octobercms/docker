@@ -1,0 +1,5 @@
+# HTTPS port mapping - included for production environments only
+services:
+  web:
+    ports:
+      - "${HTTPS_PORT:-443}:443"
