@@ -248,15 +248,6 @@ cmd_start() {
         fatal "Site directory not found: $SITE_PATH\nRun './october-setup $site_name' first."
     fi
 
-    # Ensure data directories exist with correct ownership
-    # MariaDB/Redis run as UID 999 and need to own their data dirs
-    if [ "$USE_MARIADB" = "true" ]; then
-        docker run --rm -v "$SITE_PATH/.data":/data alpine sh -c "mkdir -p /data/mysql && chown -R 999:999 /data/mysql"
-    fi
-    if [ "$USE_REDIS" = "true" ]; then
-        docker run --rm -v "$SITE_PATH/.data":/data alpine sh -c "mkdir -p /data/redis && chown -R 999:999 /data/redis"
-    fi
-
     local services=$(get_services)
     $(compose_cmd) up -d $services
 
@@ -303,7 +294,7 @@ cmd_destroy() {
     load_config "$site_name"
 
     warning "This will stop and remove containers for $site_name."
-    warning "Site data in $SITE_PATH will be preserved."
+    warning "Site files in $SITE_PATH and Docker volumes will be preserved."
     read -p "Are you sure? [y/N]: " confirm
     if [[ ! "$confirm" =~ ^[Yy] ]]; then
         info "Cancelled."
@@ -311,9 +302,9 @@ cmd_destroy() {
     fi
 
     info "Destroying containers for $site_name..."
-    $(compose_cmd) down -v --remove-orphans
+    $(compose_cmd) down --remove-orphans
 
-    success "Containers removed. Data preserved in $SITE_PATH"
+    success "Containers removed. Site files and Docker volumes preserved."
 }
 
 cmd_wipe() {

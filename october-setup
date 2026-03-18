@@ -403,13 +403,6 @@ create_site_directory() {
         info "Site directory already exists: $expanded_path"
     fi
 
-    # Create .data parent directory only - let containers create their
-    # own subdirectories (mysql, redis) with correct ownership/permissions
-    if [ "$USE_MARIADB" = "true" ] || [ "$USE_REDIS" = "true" ]; then
-        if ! mkdir -p "$expanded_path/.data" 2>/dev/null; then
-            fatal "Cannot create $expanded_path/.data - permission denied"
-        fi
-    fi
 }
 
 create_env_file() {

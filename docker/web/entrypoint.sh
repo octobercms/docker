@@ -85,7 +85,7 @@ if [ ! -f /var/www/html/artisan ]; then
         # Preserve our .env file (has APP_KEY, DB credentials, etc.)
         cp /var/www/html/.env /tmp/env-backup 2>/dev/null || true
 
-        # Clone to temp directory (site dir may have .env and .data)
+        # Clone to temp directory (site dir may already contain .env)
         if [ -n "$OCTOBER_BRANCH" ]; then
             echo "Using branch: $OCTOBER_BRANCH"
             git clone -b "$OCTOBER_BRANCH" "$OCTOBER_REPO" /tmp/october-install
@@ -120,7 +120,7 @@ if [ ! -f /var/www/html/artisan ]; then
         # Preserve our .env file (has APP_KEY, DB credentials, etc.)
         cp /var/www/html/.env /tmp/env-backup 2>/dev/null || true
 
-        # Install to temp directory (site dir may have .env and .data)
+        # Install to temp directory (site dir may already contain .env)
         composer create-project october/october /tmp/october-install --no-interaction
 
         # Remove October's generated .env (we have our own)
@@ -137,9 +137,9 @@ if [ ! -f /var/www/html/artisan ]; then
         rm -f /tmp/env-backup
     fi
 
-    # Set permissions (exclude .data which has its own ownership requirements)
+    # Set permissions for the application tree mounted from the host
     echo "Setting permissions..."
-    find /var/www/html -path /var/www/html/.data -prune -o -exec chown www-data:www-data {} +
+    find /var/www/html -exec chown www-data:www-data {} +
     chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache 2>/dev/null || true
 
     # Clear any cached configuration (ensures .env values are used)
