@@ -405,7 +405,7 @@ cmd_status() {
 
         # Check if running
         local status_text
-        if docker ps --format '{{.Names}}' | grep -q "^${name}-web"; then
+        if docker ps --format '{{.Names}}' | grep -q "^${name}_web"; then
             status_text="${GREEN}RUNNING${NC}"
         else
             status_text="${RED}stopped${NC}"
