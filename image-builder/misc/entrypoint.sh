@@ -71,8 +71,8 @@ fi
 # -----------------------------------------------------------------------------
 echo "Running migrations..."
 cd /var/www/html
-if ! php artisan october:migrate 2>&1 | grep -v "ERROR 1045"; then
-    if ! php artisan october:up 2>&1 | grep -v "ERROR 1045"; then
+if ! php artisan october:migrate 2>&1; then
+    if ! php artisan october:up 2>&1; then
         echo "WARNING: Migrations failed. Run 'php artisan october:migrate' manually."
     fi
 fi
