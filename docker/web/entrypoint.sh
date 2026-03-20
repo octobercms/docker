@@ -208,12 +208,16 @@ if [ $tries -lt $max_tries ]; then
     # Create/update public directory mirror
     echo "Updating public directory..."
     mkdir -p /var/www/html/public
+    chown www-data:www-data /var/www/html/public
     php artisan october:mirror --relative 2>/dev/null || true
 fi
 
 # Ensure permissions are correct on every start
 chown -R www-data:www-data /var/www/html/storage 2>/dev/null || true
 chown -R www-data:www-data /var/www/html/bootstrap/cache 2>/dev/null || true
+
+# Dump container environment for cron (cron runs with a minimal environment)
+env >> /etc/environment
 
 # Set up cron job to keep public directory mirror in sync (cron managed by supervisor)
 printf "* * * * * www-data cd /var/www/html && /usr/local/bin/php artisan october:mirror --relative --quiet 2>/dev/null\n" > /etc/cron.d/october-mirror

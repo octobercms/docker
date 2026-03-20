@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y \
     libpng-dev \
     libjpeg-dev \
     libfreetype6-dev \
+    libwebp-dev \
     libzip-dev \
     libicu-dev \
     libxml2-dev \
@@ -33,7 +34,7 @@ RUN a2dismod mpm_prefork \
     && a2enmod mpm_event rewrite headers proxy_fcgi setenvif http2 ssl
 
 # Install PHP extensions required by October CMS
-RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
     && docker-php-ext-install -j$(nproc) \
         pdo_mysql \
         opcache \
@@ -43,6 +44,7 @@ RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
         xml \
         mbstring \
         bcmath \
+        exif \
     && pecl install redis xdebug \
     && docker-php-ext-enable redis
 
