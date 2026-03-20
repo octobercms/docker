@@ -341,9 +341,12 @@ cmd_wipe() {
 
     if [ -d "$expanded_path" ]; then
         info "Removing site files: $expanded_path"
-        # Use a temporary container to remove root-owned files created by Docker
-        docker run --rm -v "$expanded_path":/wipe alpine rm -rf /wipe/. 2>/dev/null || true
-        rm -rf "$expanded_path"
+        # Files are owned by root (created inside Docker container), so use sudo
+        sudo rm -rf "$expanded_path"
+        if [ -d "$expanded_path" ]; then
+            warning "Could not fully remove $expanded_path"
+            warning "Try manually: sudo rm -rf $expanded_path"
+        fi
     fi
 
     if [ -f "$config_file" ]; then
