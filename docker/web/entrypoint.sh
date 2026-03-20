@@ -202,6 +202,10 @@ fi
 chown -R www-data:www-data /var/www/html/storage 2>/dev/null || true
 chown -R www-data:www-data /var/www/html/bootstrap/cache 2>/dev/null || true
 
+# Set up cron job to keep public directory mirror in sync (cron managed by supervisor)
+echo "* * * * * www-data cd /var/www/html && /usr/local/bin/php artisan october:mirror public --quiet 2>/dev/null" > /etc/cron.d/october-mirror
+chmod 644 /etc/cron.d/october-mirror
+
 # Development mode: Make files accessible to host user for editing
 # This allows VS Code and other editors on the host to modify files
 if [ "$APP_ENV" != "production" ]; then
