@@ -6,7 +6,7 @@ Docker-based deployment for October CMS with a simple CLI interface.
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/october-docker.git
+git clone https://github.com/octobercms/october-docker.git
 cd october-docker
 
 # Set up a new site
