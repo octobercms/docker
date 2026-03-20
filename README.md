@@ -40,9 +40,6 @@ october-docker/                    # This repository (clone once)
 
 ~/october-sites/myapp/             # Your site files
 ├── .env                           # Environment variables
-├── .data/                         # Database & Redis data
-│   ├── mysql/
-│   └── redis/
 ├── artisan                        # October CMS files
 ├── composer.json
 └── ...
@@ -97,7 +94,7 @@ Run multiple October sites from one installation:
 ./launcher start corporate
 ```
 
-Each site has isolated containers and data directories.
+Each site has isolated containers and Docker volumes for persisted MariaDB and Redis data.
 
 ## VS Code Development
 
@@ -202,8 +199,8 @@ Generated automatically by `october-setup`. Contains:
 
 - **PHP**: 8.3 with FPM
 - **Web Server**: Apache with HTTP/2
-- **Database**: MariaDB 10.11
-- **Cache**: Redis 7
+- **Database**: MariaDB 10.11 with named Docker volumes
+- **Cache**: Redis 7 with named Docker volumes
 - **Process Manager**: Supervisor
 
 ## Troubleshooting

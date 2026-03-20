@@ -41,7 +41,7 @@ services:
     image: mariadb:10.11
     container_name: ${SITE_NAME}_mariadb
     volumes:
-      - ${SITE_PATH}/.data/mysql:/var/lib/mysql
+      - mariadb_data:/var/lib/mysql
     env_file:
       - ${SITE_PATH}/.env
     healthcheck:
@@ -58,7 +58,7 @@ services:
     image: redis:7-alpine
     container_name: ${SITE_NAME}_redis
     volumes:
-      - ${SITE_PATH}/.data/redis:/data
+      - redis_data:/data
     command: redis-server --appendonly yes
     networks:
       - october_network
@@ -67,3 +67,9 @@ services:
 networks:
   october_network:
     driver: bridge
+
+volumes:
+  mariadb_data:
+    name: ${SITE_NAME}_mariadb_data
+  redis_data:
+    name: ${SITE_NAME}_redis_data
