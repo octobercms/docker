@@ -72,6 +72,7 @@ Commands:
   stop <site>       Stop the site containers
   restart <site>    Restart the site containers
   rebuild <site>    Rebuild and restart containers (after Dockerfile changes)
+                    Use --no-cache for a full rebuild (e.g. after changing system deps)
   destroy <site>    Stop and remove containers (preserves data)
   wipe <site>       Completely remove a site (containers, files, config)
   enter <site>      Open a shell in the web container
@@ -88,6 +89,7 @@ Examples:
   ./launcher logs app
   ./launcher enter app
   ./launcher rebuild app
+  ./launcher rebuild app --no-cache
 
 Site configurations are stored in containers/<site>.yml
 Site data is stored at the path specified in the configuration.
@@ -277,11 +279,19 @@ cmd_restart() {
 
 cmd_rebuild() {
     local site_name="$1"
+    shift
     load_config "$site_name"
+
+    local build_args=""
+    for arg in "$@"; do
+        case "$arg" in
+            --no-cache) build_args="$build_args --no-cache" ;;
+        esac
+    done
 
     info "Rebuilding $site_name..."
     $(compose_cmd) down
-    $(compose_cmd) build --no-cache
+    $(compose_cmd) build $build_args
 
     local services=$(get_services)
     $(compose_cmd) up -d $services
@@ -567,13 +577,14 @@ main() {
 
     local command="$1"
     local site_name="$2"
+    shift 2 2>/dev/null || shift $#
 
     case "$command" in
         start|stop|restart|rebuild|destroy|wipe|enter|logs|code)
             if [ -z "$site_name" ]; then
                 fatal "Site name required. Usage: ./launcher $command <site_name>"
             fi
-            cmd_$command "$site_name"
+            cmd_$command "$site_name" "$@"
             ;;
         status)
             cmd_status
