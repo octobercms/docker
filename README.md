@@ -53,7 +53,8 @@ october-docker/                    # This repository (clone once)
 | `./launcher start <name>` | Start containers |
 | `./launcher stop <name>` | Stop containers |
 | `./launcher restart <name>` | Restart containers |
-| `./launcher rebuild <name>` | Rebuild and restart (after Dockerfile changes) |
+| `./launcher rebuild <name>` | Rebuild and restart (uses Docker cache for speed) |
+| `./launcher rebuild <name> --no-cache` | Full rebuild from scratch (after changing system deps) |
 | `./launcher enter <name>` | Open shell in web container |
 | `./launcher logs <name>` | View container logs |
 | `./launcher code <name>` | Open VS Code attached to the web container |
