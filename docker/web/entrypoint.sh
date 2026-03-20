@@ -77,96 +77,109 @@ if [ ! -f /var/www/html/artisan ]; then
     echo "October CMS not found. Installing..."
     echo "============================================"
 
-    cd /var/www/html
+    install_failed=0
 
-    if [ -n "$OCTOBER_REPO" ]; then
-        echo "Cloning from custom repo: $OCTOBER_REPO"
+    (
+        set -e
+        cd /var/www/html
 
-        # Preserve our .env file (has APP_KEY, DB credentials, etc.)
-        cp /var/www/html/.env /tmp/env-backup 2>/dev/null || true
+        if [ -n "$OCTOBER_REPO" ]; then
+            echo "Cloning from custom repo: $OCTOBER_REPO"
 
-        # Clone to temp directory (site dir may already contain .env)
-        if [ -n "$OCTOBER_BRANCH" ]; then
-            echo "Using branch: $OCTOBER_BRANCH"
-            git clone -b "$OCTOBER_BRANCH" "$OCTOBER_REPO" /tmp/october-install
+            # Preserve our .env file (has APP_KEY, DB credentials, etc.)
+            cp /var/www/html/.env /tmp/env-backup 2>/dev/null || true
+
+            # Clone to temp directory (site dir may already contain .env)
+            if [ -n "$OCTOBER_BRANCH" ]; then
+                echo "Using branch: $OCTOBER_BRANCH"
+                git clone -b "$OCTOBER_BRANCH" "$OCTOBER_REPO" /tmp/october-install
+            else
+                git clone "$OCTOBER_REPO" /tmp/october-install
+            fi
+
+            # Remove repo's .env if present (we have our own)
+            rm -f /tmp/october-install/.env 2>/dev/null || true
+
+            # Move all files including hidden ones (except . and ..)
+            shopt -s dotglob
+            mv /tmp/october-install/* /var/www/html/ 2>/dev/null || true
+            shopt -u dotglob
+            rm -rf /tmp/october-install
+
+            # Restore our .env file
+            cp /tmp/env-backup /var/www/html/.env 2>/dev/null || true
+            rm -f /tmp/env-backup
+
+            # Install dependencies (dev or prod based on environment)
+            if [ "$APP_ENV" = "production" ]; then
+                echo "Installing dependencies (production)..."
+                composer install --no-interaction --no-dev --optimize-autoloader
+            else
+                echo "Installing dependencies (development)..."
+                composer install --no-interaction
+            fi
         else
-            git clone "$OCTOBER_REPO" /tmp/october-install
+            echo "Installing fresh October CMS via Composer..."
+
+            # Preserve our .env file (has APP_KEY, DB credentials, etc.)
+            cp /var/www/html/.env /tmp/env-backup 2>/dev/null || true
+
+            # Install to temp directory (site dir may already contain .env)
+            composer create-project october/october /tmp/october-install --no-interaction
+
+            # Remove October's generated .env (we have our own)
+            rm -f /tmp/october-install/.env 2>/dev/null || true
+
+            # Move all files including hidden ones (except . and ..)
+            shopt -s dotglob
+            mv /tmp/october-install/* /var/www/html/ 2>/dev/null || true
+            shopt -u dotglob
+            rm -rf /tmp/october-install
+
+            # Restore our .env file
+            cp /tmp/env-backup /var/www/html/.env 2>/dev/null || true
+            rm -f /tmp/env-backup
         fi
+    ) || install_failed=1
 
-        # Remove repo's .env if present (we have our own)
-        rm -f /tmp/october-install/.env 2>/dev/null || true
-
-        # Move all files including hidden ones (except . and ..)
-        shopt -s dotglob
-        mv /tmp/october-install/* /var/www/html/ 2>/dev/null || true
-        shopt -u dotglob
-        rm -rf /tmp/october-install
-
-        # Restore our .env file
-        cp /tmp/env-backup /var/www/html/.env 2>/dev/null || true
-        rm -f /tmp/env-backup
-
-        # Install dependencies (dev or prod based on environment)
-        if [ "$APP_ENV" = "production" ]; then
-            echo "Installing dependencies (production)..."
-            composer install --no-interaction --no-dev --optimize-autoloader
-        else
-            echo "Installing dependencies (development)..."
-            composer install --no-interaction
-        fi
+    if [ "$install_failed" = "1" ]; then
+        echo "============================================"
+        echo "WARNING: Installation failed!"
+        echo "         Container will start anyway."
+        echo "         Use './launcher enter <site>' to debug."
+        echo "============================================"
     else
-        echo "Installing fresh October CMS via Composer..."
+        # Set permissions for the application tree mounted from the host
+        echo "Setting permissions..."
+        find /var/www/html -exec chown www-data:www-data {} +
+        chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache 2>/dev/null || true
 
-        # Preserve our .env file (has APP_KEY, DB credentials, etc.)
-        cp /var/www/html/.env /tmp/env-backup 2>/dev/null || true
+        # Clear any cached configuration (ensures .env values are used)
+        echo "Clearing config cache..."
+        php artisan config:clear 2>/dev/null || true
+        php artisan cache:clear 2>/dev/null || true
 
-        # Install to temp directory (site dir may already contain .env)
-        composer create-project october/october /tmp/october-install --no-interaction
-
-        # Remove October's generated .env (we have our own)
-        rm -f /tmp/october-install/.env 2>/dev/null || true
-
-        # Move all files including hidden ones (except . and ..)
-        shopt -s dotglob
-        mv /tmp/october-install/* /var/www/html/ 2>/dev/null || true
-        shopt -u dotglob
-        rm -rf /tmp/october-install
-
-        # Restore our .env file
-        cp /tmp/env-backup /var/www/html/.env 2>/dev/null || true
-        rm -f /tmp/env-backup
-    fi
-
-    # Set permissions for the application tree mounted from the host
-    echo "Setting permissions..."
-    find /var/www/html -exec chown www-data:www-data {} +
-    chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache 2>/dev/null || true
-
-    # Clear any cached configuration (ensures .env values are used)
-    echo "Clearing config cache..."
-    php artisan config:clear 2>/dev/null || true
-    php artisan cache:clear 2>/dev/null || true
-
-    # Verify .env has required database configuration
-    if [ -f /var/www/html/.env ]; then
-        if grep -q "^DB_DATABASE=" /var/www/html/.env && grep -q "^DB_USERNAME=" /var/www/html/.env; then
-            echo "Environment file verified."
+        # Verify .env has required database configuration
+        if [ -f /var/www/html/.env ]; then
+            if grep -q "^DB_DATABASE=" /var/www/html/.env && grep -q "^DB_USERNAME=" /var/www/html/.env; then
+                echo "Environment file verified."
+            else
+                echo "WARNING: .env file missing database configuration!"
+                echo "         DB_DATABASE and DB_USERNAME are required."
+            fi
         else
-            echo "WARNING: .env file missing database configuration!"
-            echo "         DB_DATABASE and DB_USERNAME are required."
+            # Copy from .env.example if our .env is missing
+            if [ -f /var/www/html/.env.example ]; then
+                echo "WARNING: .env file not found, copying from .env.example"
+                echo "         You may need to update database credentials!"
+                cp /var/www/html/.env.example /var/www/html/.env
+            fi
         fi
-    else
-        # Copy from .env.example if our .env is missing
-        if [ -f /var/www/html/.env.example ]; then
-            echo "WARNING: .env file not found, copying from .env.example"
-            echo "         You may need to update database credentials!"
-            cp /var/www/html/.env.example /var/www/html/.env
-        fi
-    fi
 
-    echo "============================================"
-    echo "October CMS installed successfully!"
-    echo "============================================"
+        echo "============================================"
+        echo "October CMS installed successfully!"
+        echo "============================================"
+    fi
 fi
 
 # Wait for database and run migrations on every start
@@ -195,7 +208,7 @@ if [ $tries -lt $max_tries ]; then
     # Create/update public directory mirror
     echo "Updating public directory..."
     mkdir -p /var/www/html/public
-    php artisan october:mirror public --relative 2>/dev/null || true
+    php artisan october:mirror --relative 2>/dev/null || true
 fi
 
 # Ensure permissions are correct on every start
@@ -203,7 +216,7 @@ chown -R www-data:www-data /var/www/html/storage 2>/dev/null || true
 chown -R www-data:www-data /var/www/html/bootstrap/cache 2>/dev/null || true
 
 # Set up cron job to keep public directory mirror in sync (cron managed by supervisor)
-echo "* * * * * www-data cd /var/www/html && /usr/local/bin/php artisan october:mirror public --quiet 2>/dev/null" > /etc/cron.d/october-mirror
+printf "* * * * * www-data cd /var/www/html && /usr/local/bin/php artisan october:mirror --relative --quiet 2>/dev/null\n" > /etc/cron.d/october-mirror
 chmod 644 /etc/cron.d/october-mirror
 
 # Development mode: Make files accessible to host user for editing
